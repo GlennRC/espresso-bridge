@@ -1,0 +1,238 @@
+/* espresso-bridge — touchscreen UI (800×480, dark theme) */
+
+:root {
+  --bg: #1a1a1a;
+  --card-bg: #252525;
+  --text: #e0e0e0;
+  --text-dim: #888;
+  --accent: #d4a053;
+  --accent-dim: #8b6a30;
+  --green: #4caf50;
+  --red: #f44336;
+  --orange: #ff9800;
+  --blue: #2196f3;
+  --radius: 12px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 800px;
+  height: 480px;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+/* Status Bar */
+#status-bar {
+  display: flex;
+  gap: 16px;
+  padding: 8px 16px;
+  background: #111;
+  font-size: 14px;
+}
+.status-item {
+  color: var(--text-dim);
+}
+.status-item.connected { color: var(--green); }
+.status-item.disconnected { color: var(--red); }
+.status-item.connecting { color: var(--orange); animation: pulse 1.5s infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Main Layout */
+main {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  height: calc(480px - 36px);
+}
+
+/* Cards */
+.card {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.card h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Weight Card */
+.weight-card {
+  flex: 1.2;
+  align-items: center;
+  justify-content: center;
+}
+.weight-display {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.weight-value {
+  font-size: 96px;
+  font-weight: 300;
+  line-height: 1;
+  min-width: 140px;
+  text-align: center;
+}
+.weight-unit {
+  font-size: 32px;
+  color: var(--text-dim);
+  margin-left: -8px;
+}
+.weight-btn {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-size: 32px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.weight-btn:active {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.weight-presets {
+  display: flex;
+  gap: 8px;
+}
+.preset-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid #444;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  cursor: pointer;
+}
+.preset-btn:active, .preset-btn.active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+.shot-indicator {
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  background: #333;
+  color: var(--text-dim);
+}
+.shot-indicator.brewing {
+  background: var(--green);
+  color: #000;
+  animation: pulse 1s infinite;
+}
+
+/* Machine Card */
+.machine-card {
+  flex: 1;
+}
+.control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+.control-row label {
+  font-size: 16px;
+  color: var(--text-dim);
+}
+
+.toggle-btn {
+  padding: 10px 24px;
+  border-radius: 8px;
+  border: 2px solid var(--red);
+  background: transparent;
+  color: var(--red);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  min-width: 80px;
+}
+.toggle-btn.on {
+  border-color: var(--green);
+  color: var(--green);
+}
+.toggle-btn:active {
+  opacity: 0.7;
+}
+
+.temp-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.temp-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid #555;
+  background: transparent;
+  color: var(--text);
+  font-size: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.temp-btn:active {
+  background: #444;
+}
+#coffee-temp {
+  font-size: 28px;
+  font-weight: 300;
+  min-width: 60px;
+  text-align: center;
+}
+.unit {
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+.steam-levels {
+  display: flex;
+  gap: 8px;
+}
+.level-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  border: 1px solid #555;
+  background: transparent;
+  color: var(--text);
+  font-size: 18px;
+  cursor: pointer;
+}
+.level-btn.active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+.level-btn:active {
+  opacity: 0.7;
+}

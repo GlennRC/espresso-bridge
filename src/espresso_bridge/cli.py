@@ -41,6 +41,16 @@ def main(verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable deb
 
 
 @app.command()
+def serve(
+    config_path: str = typer.Option("config.yaml", "--config", "-c", help="Config file path"),
+):
+    """Start the espresso-bridge service (web UI + BLE connections)."""
+    from espresso_bridge.main import main as run_service
+
+    run_service(config_path)
+
+
+@app.command()
 def scan(timeout: float = typer.Option(8.0, help="Scan duration in seconds")):
     """Scan for ShotStopper BLE devices."""
 

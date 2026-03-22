@@ -6,6 +6,7 @@ Serves the static touchscreen UI from /static.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -53,13 +54,22 @@ class SteamRequest(BaseModel):
     enabled: bool | None = None
 
 
-def create_app(manager: DeviceManager, store: StateStore) -> FastAPI:
+def create_app(
+    manager: DeviceManager,
+    store: StateStore,
+    watchdog_coro=None,
+) -> FastAPI:
     """Create the FastAPI application with device manager and state store injected."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await manager.start()
+        wd_task = None
+        if watchdog_coro:
+            wd_task = asyncio.create_task(watchdog_coro())
         yield
+        if wd_task:
+            wd_task.cancel()
         await manager.stop()
 
     app = FastAPI(title="espresso-bridge", version="0.1.0", lifespan=lifespan)

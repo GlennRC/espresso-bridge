@@ -6,6 +6,7 @@ Supports systemd watchdog via sd_notify (if available).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import socket
@@ -35,6 +36,18 @@ def _sd_notify(state: str) -> None:
         pass
 
 
+async def _watchdog_loop() -> None:
+    """Send WATCHDOG=1 to systemd every WatchdogSec/2 seconds."""
+    usec = os.environ.get("WATCHDOG_USEC")
+    if not usec:
+        return
+    interval = int(usec) / 1_000_000 / 2  # half the watchdog period
+    logger.info(f"Watchdog heartbeat every {interval:.0f}s")
+    while True:
+        _sd_notify("WATCHDOG=1")
+        await asyncio.sleep(interval)
+
+
 def main(config_path: str | None = None) -> None:
     """Start the espresso-bridge service."""
     logging.basicConfig(
@@ -61,7 +74,7 @@ def main(config_path: str | None = None) -> None:
     # Create components
     store = StateStore()
     manager = DeviceManager(config, store)
-    app = create_app(manager, store)
+    app = create_app(manager, store, watchdog_coro=_watchdog_loop)
 
     # Notify systemd we're ready
     _sd_notify("READY=1")

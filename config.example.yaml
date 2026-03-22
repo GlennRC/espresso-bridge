@@ -1,0 +1,24 @@
+# espresso-bridge configuration
+# Copy to config.yaml and edit for your setup.
+
+# ShotStopper settings
+shotstopper:
+  # BLE address (leave empty to auto-scan)
+  address: ""
+  # Default target weight (grams)
+  default_weight: 36
+  # Auto-reconnect on disconnect
+  auto_reconnect: true
+  # Reconnect interval (seconds)
+  reconnect_interval: 5
+
+# La Marzocco Linea Micra settings (Phase 2)
+# lamarzocco:
+#   serial_number: ""
+#   communication_key: ""
+#   username: ""
+
+# Web server settings
+server:
+  host: "0.0.0.0"
+  port: 8080

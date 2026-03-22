@@ -132,7 +132,11 @@ class DeviceManager:
     # -- La Marzocco management --
 
     async def _manage_lamarzocco(self) -> None:
-        """Connection loop for the La Marzocco."""
+        """Connection loop for the La Marzocco.
+
+        Once connected, periodically refreshes state from the machine.
+        Detects BLE disconnects and reconnects automatically.
+        """
         if not self._lamarzocco:
             return
 
@@ -141,9 +145,16 @@ class DeviceManager:
         interval = self._config.shotstopper.reconnect_interval
 
         while self._running:
-            if self._lamarzocco.state.connected:
+            # Check actual BLE connection (not model state)
+            if self._lamarzocco.connected:
                 self._lm_phase = ConnectionPhase.CONNECTED
-                await asyncio.sleep(5.0)
+                # Refresh state every 10s (also validates connection is alive)
+                try:
+                    await self._lamarzocco.refresh_state()
+                except Exception:
+                    logger.warning("La Marzocco: BLE connection lost during refresh")
+                    self._lm_phase = ConnectionPhase.DISCONNECTED
+                await asyncio.sleep(10.0)
                 continue
 
             self._lm_phase = ConnectionPhase.SCANNING

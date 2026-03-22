@@ -1,38 +1,36 @@
 """La Marzocco Linea Micra BLE adapter.
 
-Communicates with the La Marzocco espresso machine over Bluetooth Low Energy
-using the pylamarzocco library. Supports power control, boiler temperature,
-steam control, and state reading.
+Direct BLE communication with the La Marzocco espresso machine using bleak.
+No auth required on this firmware — reads state from the status characteristic
+and writes JSON commands to the write characteristic.
 
-Requires one-time credential setup:
-  - communication_key: BLE auth token (extracted from cloud API — see docs)
+GATT Characteristics (service d10a7847-e12b-09a8-b04b-8e0922a9abab):
+  STATUS (050b): read/write — returns full JSON state, accepts JSON commands
+  WRITE  (0b0b): read/write — also accepts JSON commands
+  READ   (0a0b): read/write — requires auth (not used)
+  WIFI   (d60a): read — WiFi scan results
+  SSID   (d70a): read — current WiFi SSID
+
+Requires one-time setup:
+  - BLE address from a scan (e.g. 70:B8:F6:AF:4A:FA)
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Callable
 
-from bleak import BleakScanner
+from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
 
 from espresso_bridge.core.models import LaMarzoccoState
 
 logger = logging.getLogger(__name__)
 
-try:
-    from pylamarzocco.clients._bluetooth import (
-        LaMarzoccoBluetoothClient as PyLMBluetoothClient,
-    )
-    from pylamarzocco.const import BoilerType, MachineMode
-
-    PYLAMARZOCCO_AVAILABLE = True
-except ImportError:
-    PYLAMARZOCCO_AVAILABLE = False
-    logger.warning(
-        "pylamarzocco not installed — La Marzocco features disabled. "
-        "pip install pylamarzocco"
-    )
+# LM GATT characteristic UUIDs
+STATUS_CHAR = "050b7847-e12b-09a8-b04b-8e0922a9abab"
+WRITE_CHAR = "0b0b7847-e12b-09a8-b04b-8e0922a9abab"
 
 # Linea Micra steam levels map to specific temperatures
 STEAM_LEVEL_MAP = {
@@ -51,25 +49,20 @@ BT_MODEL_PREFIXES = ("MICRA", "MINI", "GS3", "LM")
 class LaMarzoccoAdapter:
     """BLE adapter for the La Marzocco Linea Micra.
 
-    Uses pylamarzocco which handles BLE connect/auth/retry internally.
-    The adapter manages scanning and state tracking.
+    Uses direct bleak BLE communication. Reads state from the STATUS
+    characteristic and writes JSON commands. No auth required.
     """
 
     def __init__(
         self,
-        communication_key: str,
         on_state_change: Callable[[LaMarzoccoState], None] | None = None,
-        # Legacy params — kept for config compat but not used by pylamarzocco BLE
+        # Legacy params — kept for config compatibility
+        communication_key: str = "",
         username: str = "",
         serial_number: str = "",
     ):
-        if not PYLAMARZOCCO_AVAILABLE:
-            raise RuntimeError("pylamarzocco not installed. Run: pip install pylamarzocco")
-
-        self._communication_key = communication_key
         self._on_state_change = on_state_change
-
-        self._client: PyLMBluetoothClient | None = None
+        self._client: BleakClient | None = None
         self._device: BLEDevice | None = None
         self._state = LaMarzoccoState()
 
@@ -97,28 +90,26 @@ class LaMarzoccoAdapter:
     async def connect(
         self, device: BLEDevice | None = None, address: str | None = None
     ) -> bool:
-        """Connect and verify by reading machine mode."""
-        if not PYLAMARZOCCO_AVAILABLE:
-            return False
-
+        """Connect to the LM machine and read initial state."""
         device = await self._resolve_device(device, address)
         if device is None:
             return False
 
         try:
             self._device = device
-            self._client = PyLMBluetoothClient(
-                ble_device=device,
-                ble_token=self._communication_key,
-            )
+            self._client = BleakClient(device, timeout=15)
+            await self._client.connect()
 
-            mode = await self._client.get_machine_mode()
-            turned_on = mode == MachineMode.BREWING_MODE
-            self._state = self._state.model_copy(
-                update={"connected": True, "turned_on": turned_on}
+            if not self._client.is_connected:
+                logger.error("BLE connect returned but not connected")
+                return False
+
+            # Read initial state to verify connection
+            await self._read_status()
+            logger.info(
+                f"Connected to La Marzocco ({device.name} @ {device.address}), "
+                f"mode={'on' if self._state.turned_on else 'standby'}"
             )
-            self._notify_change()
-            logger.info(f"Connected to La Marzocco ({device.name}), mode={mode.value}")
             return True
 
         except Exception:
@@ -129,12 +120,12 @@ class LaMarzoccoAdapter:
     async def connect_silent(
         self, device: BLEDevice | None = None, address: str | None = None
     ) -> bool:
-        """Set up client and verify connection via a lightweight read."""
+        """Alias for connect — all connections read state."""
         return await self.connect(device=device, address=address)
 
     async def disconnect(self) -> None:
         """Disconnect from the machine."""
-        if self._client:
+        if self._client and self._client.is_connected:
             try:
                 await self._client.disconnect()
             except Exception:
@@ -147,115 +138,118 @@ class LaMarzoccoAdapter:
 
     async def set_power(self, enabled: bool) -> bool:
         """Turn the machine on or off."""
-        if not self._client:
-            logger.error("Not connected")
-            return False
-        try:
-            status = await self._client.set_power(enabled)
-            logger.info(f"Power {'on' if enabled else 'off'}: {status.status}")
+        mode = "BrewingMode" if enabled else "StandBy"
+        ok = await self._send_command(
+            "MachineChangeMode", {"mode": mode}
+        )
+        if ok:
             self._state = self._state.model_copy(update={"turned_on": enabled})
             self._notify_change()
-            return True
-        except Exception:
-            logger.exception("Failed to set power")
-            self._mark_disconnected()
-            return False
+            logger.info(f"Power {'on' if enabled else 'off'}")
+        return ok
 
     async def set_coffee_temp(self, temperature: float) -> bool:
         """Set the coffee boiler target temperature (85–104°C)."""
-        if not self._client:
-            logger.error("Not connected")
-            return False
         if temperature < COFFEE_TEMP_MIN or temperature > COFFEE_TEMP_MAX:
             logger.error(f"Coffee temp must be {COFFEE_TEMP_MIN}–{COFFEE_TEMP_MAX}°C")
             return False
-        try:
-            status = await self._client.set_temp(BoilerType.COFFEE, temperature)
-            logger.info(f"Coffee boiler target: {temperature}°C ({status.status})")
+        ok = await self._send_command(
+            "SettingBoilerTarget",
+            {"identifier": "CoffeeBoiler1", "value": temperature},
+        )
+        if ok:
             self._state = self._state.model_copy(
                 update={"coffee_temp_target": temperature}
             )
             self._notify_change()
-            return True
-        except Exception:
-            logger.exception("Failed to set coffee temp")
-            self._mark_disconnected()
-            return False
+            logger.info(f"Coffee boiler target: {temperature}°C")
+        return ok
 
     async def set_steam_level(self, level: int) -> bool:
         """Set steam level (1, 2, or 3) for Linea Micra."""
-        if not self._client:
-            logger.error("Not connected")
-            return False
         if level not in STEAM_LEVEL_MAP:
             logger.error("Steam level must be 1, 2, or 3")
             return False
-
         temp = STEAM_LEVEL_MAP[level]
-        try:
-            status = await self._client.set_temp(BoilerType.STEAM, float(temp))
-            logger.info(f"Steam level: {level} ({temp}°C) ({status.status})")
+        ok = await self._send_command(
+            "SettingBoilerTarget",
+            {"identifier": "SteamBoiler", "value": float(temp)},
+        )
+        if ok:
             self._state = self._state.model_copy(
                 update={"steam_level": level, "steam_temp_target": float(temp)}
             )
             self._notify_change()
-            return True
-        except Exception:
-            logger.exception("Failed to set steam level")
-            self._mark_disconnected()
-            return False
+            logger.info(f"Steam level: {level} ({temp}°C)")
+        return ok
 
     async def set_steam_enabled(self, enabled: bool) -> bool:
         """Enable or disable the steam boiler."""
-        if not self._client:
-            logger.error("Not connected")
-            return False
-        try:
-            status = await self._client.set_steam(enabled)
-            logger.info(f"Steam boiler {'enabled' if enabled else 'disabled'} ({status.status})")
+        ok = await self._send_command(
+            "SettingBoilerEnable",
+            {"identifier": "SteamBoiler", "state": enabled},
+        )
+        if ok:
             self._state = self._state.model_copy(update={"steam_enabled": enabled})
             self._notify_change()
-            return True
-        except Exception:
-            logger.exception("Failed to set steam")
-            self._mark_disconnected()
-            return False
+            logger.info(f"Steam boiler {'enabled' if enabled else 'disabled'}")
+        return ok
 
     async def refresh_state(self) -> LaMarzoccoState:
         """Read full machine state over BLE."""
-        if not self._client:
-            return self._state
-
-        try:
-            mode = await self._client.get_machine_mode()
-            boilers = await self._client.get_boilers()
-
-            updates: dict = {
-                "connected": True,
-                "turned_on": mode == MachineMode.BREWING_MODE,
-            }
-
-            for boiler in boilers:
-                if boiler.id == BoilerType.COFFEE:
-                    updates["coffee_boiler_enabled"] = boiler.is_enabled
-                    updates["coffee_temp_target"] = float(boiler.target)
-                    updates["coffee_temp_current"] = float(boiler.current)
-                elif boiler.id == BoilerType.STEAM:
-                    updates["steam_enabled"] = boiler.is_enabled
-                    updates["steam_temp_target"] = float(boiler.target)
-                    if boiler.target in STEAM_TEMP_TO_LEVEL:
-                        updates["steam_level"] = STEAM_TEMP_TO_LEVEL[boiler.target]
-
-            self._state = self._state.model_copy(update=updates)
-            self._notify_change()
-
-        except Exception:
-            logger.exception("Failed to refresh state")
-            self._mark_disconnected()
-
+        if self._client and self._client.is_connected:
+            try:
+                await self._read_status()
+            except Exception:
+                logger.exception("Failed to refresh state")
+                self._mark_disconnected()
         return self._state
 
-    # -- Helpers --
+    # -- Internal --
+
+    async def _send_command(self, name: str, parameter: dict) -> bool:
+        """Send a JSON command to the machine."""
+        if not self._client or not self._client.is_connected:
+            logger.error("Not connected")
+            return False
+        cmd = {"name": name, "parameter": parameter}
+        payload = json.dumps(cmd, separators=(",", ":")).encode() + b"\x00"
+        try:
+            await self._client.write_gatt_char(WRITE_CHAR, payload, response=True)
+            return True
+        except Exception:
+            logger.exception(f"Failed to send command: {name}")
+            self._mark_disconnected()
+            return False
+
+    async def _read_status(self) -> None:
+        """Read machine state from the STATUS characteristic."""
+        if not self._client or not self._client.is_connected:
+            return
+
+        raw = await self._client.read_gatt_char(STATUS_CHAR)
+        data = json.loads(raw.decode())
+
+        updates: dict = {"connected": True}
+
+        mode = data.get("machineMode", "")
+        updates["turned_on"] = mode == "BrewingMode"
+
+        for boiler in data.get("boilers", []):
+            bid = boiler.get("id", "")
+            if bid == "CoffeeBoiler1":
+                updates["coffee_boiler_enabled"] = boiler.get("isEnabled", False)
+                updates["coffee_temp_target"] = float(boiler.get("target", 93))
+                updates["coffee_temp_current"] = float(boiler.get("temperature", 0))
+            elif bid == "SteamBoiler":
+                updates["steam_enabled"] = boiler.get("isEnabled", False)
+                target = int(boiler.get("target", 128))
+                updates["steam_temp_target"] = float(target)
+                if target in STEAM_TEMP_TO_LEVEL:
+                    updates["steam_level"] = STEAM_TEMP_TO_LEVEL[target]
+
+        self._state = self._state.model_copy(update=updates)
+        self._notify_change()
 
     async def _resolve_device(
         self, device: BLEDevice | None, address: str | None
@@ -268,7 +262,6 @@ class LaMarzoccoAdapter:
             logger.info(f"La Marzocco: finding device at {address}")
             found = await BleakScanner.find_device_by_address(address, timeout=15.0)
             if found is None:
-                # Fall back to full scan (some bluez versions miss targeted scans)
                 logger.info("Targeted scan missed, trying full scan...")
                 devices = await BleakScanner.discover(timeout=10.0)
                 for d in devices:

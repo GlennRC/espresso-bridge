@@ -31,6 +31,7 @@ class DeviceManager:
     def __init__(self, config: AppConfig, store: StateStore) -> None:
         self._config = config
         self._store = store
+        self._scan_lock = asyncio.Lock()  # BLE adapter only supports one scan at a time
 
         self._shotstopper = ShotStopperAdapter(
             on_state_change=store.update_shotstopper,
@@ -110,12 +111,13 @@ class DeviceManager:
                 await asyncio.sleep(2.0)
                 continue
 
-            # Attempt connection
+            # Attempt connection (acquire scan lock to prevent BLE overlap)
             self._ss_phase = ConnectionPhase.SCANNING
             logger.info("ShotStopper: scanning...")
 
             self._ss_phase = ConnectionPhase.CONNECTING
-            success = await self._shotstopper.connect(address=addr)
+            async with self._scan_lock:
+                success = await self._shotstopper.connect(address=addr)
 
             if success:
                 self._ss_phase = ConnectionPhase.CONNECTED
@@ -148,7 +150,8 @@ class DeviceManager:
             logger.info("La Marzocco: scanning...")
 
             self._lm_phase = ConnectionPhase.CONNECTING
-            success = await self._lamarzocco.connect_silent(address=addr)
+            async with self._scan_lock:
+                success = await self._lamarzocco.connect_silent(address=addr)
 
             if success:
                 self._lm_phase = ConnectionPhase.CONNECTED

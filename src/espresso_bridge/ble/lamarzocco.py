@@ -90,24 +90,38 @@ class LaMarzoccoAdapter:
     async def connect(
         self, device: BLEDevice | None = None, address: str | None = None
     ) -> bool:
-        """Connect to the LM machine and read initial state."""
-        device = await self._resolve_device(device, address)
-        if device is None:
-            return False
+        """Connect to the LM machine and read initial state.
+
+        On Linux/bluez, connecting by address works even if the device
+        isn't actively advertising (uses cached device info).
+        """
+        if device is None and address is not None:
+            # Try scanning first, but fall back to direct address connection
+            device = await self._resolve_device(None, address)
+
+        if device is None and address is None:
+            device = await self._resolve_device(None, None)
 
         try:
+            # Use BLEDevice if found, otherwise connect directly by address
+            target = device if device is not None else address
+            if target is None:
+                logger.error("No device or address to connect to")
+                return False
+
             self._device = device
-            self._client = BleakClient(device, timeout=15)
+            self._client = BleakClient(target, timeout=20)
             await self._client.connect()
 
             if not self._client.is_connected:
                 logger.error("BLE connect returned but not connected")
                 return False
 
-            # Read initial state to verify connection
             await self._read_status()
+            name = device.name if device else address
+            addr_str = device.address if device else address
             logger.info(
-                f"Connected to La Marzocco ({device.name} @ {device.address}), "
+                f"Connected to La Marzocco ({name} @ {addr_str}), "
                 f"mode={'on' if self._state.turned_on else 'standby'}"
             )
             return True
@@ -254,21 +268,25 @@ class LaMarzoccoAdapter:
     async def _resolve_device(
         self, device: BLEDevice | None, address: str | None
     ) -> BLEDevice | None:
-        """Find a BLEDevice from an address or by scanning."""
+        """Try to find a BLEDevice from an address or by scanning.
+
+        Returns None if not found — caller can fall back to direct address connection.
+        """
         if device is not None:
             return device
 
         if address is not None:
-            logger.info(f"La Marzocco: finding device at {address}")
-            found = await BleakScanner.find_device_by_address(address, timeout=15.0)
-            if found is None:
-                logger.info("Targeted scan missed, trying full scan...")
-                devices = await BleakScanner.discover(timeout=10.0)
-                for d in devices:
-                    if d.address == address:
-                        return d
-                logger.error(f"Device not found at address {address}")
-            return found
+            logger.info(f"La Marzocco: scanning for {address}")
+            found = await BleakScanner.find_device_by_address(address, timeout=10.0)
+            if found is not None:
+                return found
+            # Full scan fallback
+            devices = await BleakScanner.discover(timeout=8.0)
+            for d in devices:
+                if d.address == address:
+                    return d
+            logger.info("Device not in scan — will try direct address connection")
+            return None
 
         logger.info("La Marzocco: scanning for devices...")
         return next(iter(await self.scan()), None)

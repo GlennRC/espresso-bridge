@@ -1,17 +1,15 @@
 """La Marzocco Linea Micra BLE adapter.
 
 Communicates with the La Marzocco espresso machine over Bluetooth Low Energy
-using the lmcloud library. Supports power control, boiler temperature, and steam.
+using the pylamarzocco library. Supports power control, boiler temperature,
+steam control, and state reading.
 
 Requires one-time credential setup:
-  - username: La Marzocco app account username
-  - serial_number: Machine serial (printed on machine or from app)
   - communication_key: BLE auth token (extracted from cloud API — see docs)
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Callable
 
@@ -22,15 +20,19 @@ from espresso_bridge.core.models import LaMarzoccoState
 
 logger = logging.getLogger(__name__)
 
-# Re-export for type hints
 try:
-    from lmcloud import LaMarzoccoBluetoothClient, LaMarzoccoMachine
-    from lmcloud.const import BoilerType, MachineModel
+    from pylamarzocco.clients._bluetooth import (
+        LaMarzoccoBluetoothClient as PyLMBluetoothClient,
+    )
+    from pylamarzocco.const import BoilerType, MachineMode
 
-    LMCLOUD_AVAILABLE = True
+    PYLAMARZOCCO_AVAILABLE = True
 except ImportError:
-    LMCLOUD_AVAILABLE = False
-    logger.warning("lmcloud not installed — La Marzocco features disabled. pip install lmcloud")
+    PYLAMARZOCCO_AVAILABLE = False
+    logger.warning(
+        "pylamarzocco not installed — La Marzocco features disabled. "
+        "pip install pylamarzocco"
+    )
 
 # Linea Micra steam levels map to specific temperatures
 STEAM_LEVEL_MAP = {
@@ -40,34 +42,36 @@ STEAM_LEVEL_MAP = {
 }
 STEAM_TEMP_TO_LEVEL = {v: k for k, v in STEAM_LEVEL_MAP.items()}
 
-# Brew boiler temp bounds (from lmcloud source)
 COFFEE_TEMP_MIN = 85.0
 COFFEE_TEMP_MAX = 104.0
 
+BT_MODEL_PREFIXES = ("MICRA", "MINI", "GS3", "LM")
+
 
 class LaMarzoccoAdapter:
-    """BLE adapter for the La Marzocco Linea Micra."""
+    """BLE adapter for the La Marzocco Linea Micra.
+
+    Uses pylamarzocco which handles BLE connect/auth/retry internally.
+    The adapter manages scanning and state tracking.
+    """
 
     def __init__(
         self,
-        username: str,
-        serial_number: str,
         communication_key: str,
         on_state_change: Callable[[LaMarzoccoState], None] | None = None,
+        # Legacy params — kept for config compat but not used by pylamarzocco BLE
+        username: str = "",
+        serial_number: str = "",
     ):
-        if not LMCLOUD_AVAILABLE:
-            raise RuntimeError("lmcloud not installed. Run: pip install lmcloud")
+        if not PYLAMARZOCCO_AVAILABLE:
+            raise RuntimeError("pylamarzocco not installed. Run: pip install pylamarzocco")
 
-        self._username = username
-        self._serial_number = serial_number
         self._communication_key = communication_key
         self._on_state_change = on_state_change
 
-        self._bt_client: LaMarzoccoBluetoothClient | None = None
-        self._machine: LaMarzoccoMachine | None = None
+        self._client: PyLMBluetoothClient | None = None
         self._device: BLEDevice | None = None
         self._state = LaMarzoccoState()
-        self._reconnect_task: asyncio.Task | None = None
 
     @property
     def state(self) -> LaMarzoccoState:
@@ -75,156 +79,67 @@ class LaMarzoccoAdapter:
 
     @property
     def connected(self) -> bool:
-        return self._bt_client is not None and self._bt_client.connected
+        return self._client is not None and self._client.is_connected
 
     # -- Scanning --
 
     @staticmethod
     async def scan(timeout: float = 10.0) -> list[BLEDevice]:
-        """Scan for La Marzocco machines.
-
-        Looks for BLE devices whose names start with MICRA, MINI, or GS3.
-        """
-        if not LMCLOUD_AVAILABLE:
-            logger.error("lmcloud not installed")
-            return []
-
-        devices = await LaMarzoccoBluetoothClient.discover_devices()
-        return devices
+        """Scan for La Marzocco machines by name prefix."""
+        devices = await BleakScanner.discover(timeout=timeout)
+        return [
+            d for d in devices
+            if d.name and d.name.startswith(BT_MODEL_PREFIXES)
+        ]
 
     # -- Connection --
 
     async def connect(
         self, device: BLEDevice | None = None, address: str | None = None
     ) -> bool:
-        """Connect to the La Marzocco machine over BLE.
-
-        Provide a BLEDevice from scan(), a known address, or neither to auto-discover.
-        """
-        if not LMCLOUD_AVAILABLE:
+        """Connect and verify by reading machine mode."""
+        if not PYLAMARZOCCO_AVAILABLE:
             return False
 
-        if device is None and address is None:
-            devices = await self.scan()
-            if not devices:
-                logger.error("No La Marzocco machine found")
-                return False
-            device = devices[0]
-            logger.info(f"Auto-discovered: {device.name} ({device.address})")
-
-        if device is None and address is not None:
-            device = await BleakScanner.find_device_by_address(address, timeout=10.0)
-            if device is None:
-                logger.error(f"Device not found at address {address}")
-                return False
-
-        self._device = device
+        device = await self._resolve_device(device, address)
+        if device is None:
+            return False
 
         try:
-            self._bt_client = LaMarzoccoBluetoothClient(
-                username=self._username,
-                serial_number=self._serial_number,
-                token=self._communication_key,
-                address_or_ble_device=device,
+            self._device = device
+            self._client = PyLMBluetoothClient(
+                ble_device=device,
+                ble_token=self._communication_key,
             )
 
-            self._machine = LaMarzoccoMachine(
-                model=MachineModel.LINEA_MICRA,
-                serial_number=self._serial_number,
-                name="Linea Micra",
-                bluetooth_client=self._bt_client,
-            )
-
-            # Try fetching config to validate the connection works
-            # This triggers the BLE connect + auth internally
-            await self._bt_client.set_power(True)
-            # If we get here without exception, connection + auth succeeded
-            # Read back won't work without local/cloud client, so we just mark connected
+            mode = await self._client.get_machine_mode()
+            turned_on = mode == MachineMode.BREWING_MODE
             self._state = self._state.model_copy(
-                update={
-                    "connected": True,
-                    "turned_on": True,
-                }
+                update={"connected": True, "turned_on": turned_on}
             )
             self._notify_change()
-            logger.info(f"Connected to La Marzocco ({device.name})")
+            logger.info(f"Connected to La Marzocco ({device.name}), mode={mode.value}")
             return True
 
         except Exception:
             logger.exception("Failed to connect to La Marzocco")
-            self._bt_client = None
-            self._machine = None
+            self._client = None
             return False
 
     async def connect_silent(
         self, device: BLEDevice | None = None, address: str | None = None
     ) -> bool:
-        """Connect without sending any command — just set up the clients.
-
-        The actual BLE connection happens lazily on first command.
-        """
-        if not LMCLOUD_AVAILABLE:
-            return False
-
-        try:
-            if device is None and address is not None:
-                logger.info(f"La Marzocco: finding device at {address}")
-                device = await BleakScanner.find_device_by_address(address, timeout=15.0)
-                if device is None:
-                    logger.error(f"Device not found at address {address}")
-                    return False
-
-            if device is None:
-                logger.info("La Marzocco: scanning for devices...")
-                all_devices = await BleakScanner.discover(timeout=10.0)
-                lm_prefixes = ("MICRA", "MINI", "GS3", "LM")
-                for d in all_devices:
-                    if d.name and any(d.name.startswith(p) for p in lm_prefixes):
-                        device = d
-                        break
-                if device is None:
-                    logger.error("No La Marzocco machine found")
-                    return False
-
-            self._device = device
-
-            self._bt_client = LaMarzoccoBluetoothClient(
-                username=self._username,
-                serial_number=self._serial_number,
-                token=self._communication_key,
-                address_or_ble_device=device,
-            )
-
-            self._machine = LaMarzoccoMachine(
-                model=MachineModel.LINEA_MICRA,
-                serial_number=self._serial_number,
-                name="Linea Micra",
-                bluetooth_client=self._bt_client,
-            )
-
-            # Force actual BLE connection + auth now (while caller holds scan_lock)
-            # so it doesn't collide with ShotStopper scans later.
-            await self._bt_client._client.connect()
-            await self._bt_client._authenticate()
-
-            self._state = self._state.model_copy(update={"connected": True})
-            self._notify_change()
-            logger.info(f"Connected to La Marzocco ({device.name} @ {device.address})")
-            return True
-
-        except Exception:
-            logger.exception("La Marzocco connect_silent failed")
-            self._bt_client = None
-            self._machine = None
-            return False
+        """Set up client and verify connection via a lightweight read."""
+        return await self.connect(device=device, address=address)
 
     async def disconnect(self) -> None:
         """Disconnect from the machine."""
-        if self._reconnect_task and not self._reconnect_task.done():
-            self._reconnect_task.cancel()
-        # lmcloud manages its own BLE lifecycle; just clear our references
-        self._bt_client = None
-        self._machine = None
+        if self._client:
+            try:
+                await self._client.disconnect()
+            except Exception:
+                logger.debug("Error during disconnect", exc_info=True)
+        self._client = None
         self._state = self._state.model_copy(update={"connected": False})
         self._notify_change()
 
@@ -232,44 +147,44 @@ class LaMarzoccoAdapter:
 
     async def set_power(self, enabled: bool) -> bool:
         """Turn the machine on or off."""
-        if not self._machine:
+        if not self._client:
             logger.error("Not connected")
             return False
         try:
-            result = await self._machine.set_power(enabled)
-            if result:
-                self._state = self._state.model_copy(update={"turned_on": enabled})
-                self._notify_change()
-                logger.info(f"Power {'on' if enabled else 'off'}")
-            return result
+            status = await self._client.set_power(enabled)
+            logger.info(f"Power {'on' if enabled else 'off'}: {status.status}")
+            self._state = self._state.model_copy(update={"turned_on": enabled})
+            self._notify_change()
+            return True
         except Exception:
             logger.exception("Failed to set power")
+            self._mark_disconnected()
             return False
 
     async def set_coffee_temp(self, temperature: float) -> bool:
         """Set the coffee boiler target temperature (85–104°C)."""
-        if not self._machine:
+        if not self._client:
             logger.error("Not connected")
             return False
         if temperature < COFFEE_TEMP_MIN or temperature > COFFEE_TEMP_MAX:
             logger.error(f"Coffee temp must be {COFFEE_TEMP_MIN}–{COFFEE_TEMP_MAX}°C")
             return False
         try:
-            result = await self._machine.set_temp(BoilerType.COFFEE, temperature)
-            if result:
-                self._state = self._state.model_copy(
-                    update={"coffee_temp_target": temperature}
-                )
-                self._notify_change()
-                logger.info(f"Coffee boiler target: {temperature}°C")
-            return result
+            status = await self._client.set_temp(BoilerType.COFFEE, temperature)
+            logger.info(f"Coffee boiler target: {temperature}°C ({status.status})")
+            self._state = self._state.model_copy(
+                update={"coffee_temp_target": temperature}
+            )
+            self._notify_change()
+            return True
         except Exception:
             logger.exception("Failed to set coffee temp")
+            self._mark_disconnected()
             return False
 
     async def set_steam_level(self, level: int) -> bool:
         """Set steam level (1, 2, or 3) for Linea Micra."""
-        if not self._machine:
+        if not self._client:
             logger.error("Not connected")
             return False
         if level not in STEAM_LEVEL_MAP:
@@ -278,66 +193,98 @@ class LaMarzoccoAdapter:
 
         temp = STEAM_LEVEL_MAP[level]
         try:
-            result = await self._machine.set_temp(BoilerType.STEAM, temp)
-            if result:
-                self._state = self._state.model_copy(
-                    update={"steam_level": level, "steam_temp_target": float(temp)}
-                )
-                self._notify_change()
-                logger.info(f"Steam level: {level} ({temp}°C)")
-            return result
+            status = await self._client.set_temp(BoilerType.STEAM, float(temp))
+            logger.info(f"Steam level: {level} ({temp}°C) ({status.status})")
+            self._state = self._state.model_copy(
+                update={"steam_level": level, "steam_temp_target": float(temp)}
+            )
+            self._notify_change()
+            return True
         except Exception:
             logger.exception("Failed to set steam level")
+            self._mark_disconnected()
             return False
 
     async def set_steam_enabled(self, enabled: bool) -> bool:
         """Enable or disable the steam boiler."""
-        if not self._machine:
+        if not self._client:
             logger.error("Not connected")
             return False
         try:
-            result = await self._machine.set_steam(enabled)
-            if result:
-                self._state = self._state.model_copy(update={"steam_enabled": enabled})
-                self._notify_change()
-                logger.info(f"Steam boiler {'enabled' if enabled else 'disabled'}")
-            return result
+            status = await self._client.set_steam(enabled)
+            logger.info(f"Steam boiler {'enabled' if enabled else 'disabled'} ({status.status})")
+            self._state = self._state.model_copy(update={"steam_enabled": enabled})
+            self._notify_change()
+            return True
         except Exception:
             logger.exception("Failed to set steam")
+            self._mark_disconnected()
             return False
 
     async def refresh_state(self) -> LaMarzoccoState:
-        """Attempt to refresh state from the machine.
+        """Read full machine state over BLE."""
+        if not self._client:
+            return self._state
 
-        Note: Full state read requires local API or cloud client.
-        BLE-only mode has limited read capability in lmcloud v1.x.
-        State is primarily tracked via command acknowledgments.
-        """
-        if self._machine and self._machine.config:
-            cfg = self._machine.config
-            updates: dict = {"connected": True, "turned_on": cfg.turned_on}
+        try:
+            mode = await self._client.get_machine_mode()
+            boilers = await self._client.get_boilers()
 
-            if hasattr(cfg, "boilers"):
-                coffee = cfg.boilers.get(BoilerType.COFFEE)
-                steam = cfg.boilers.get(BoilerType.STEAM)
-                if coffee:
-                    updates["coffee_temp_target"] = coffee.target_temperature
-                    updates["coffee_temp_current"] = coffee.current_temperature
-                    updates["coffee_boiler_enabled"] = coffee.enabled
-                if steam:
-                    updates["steam_temp_target"] = steam.target_temperature
-                    updates["steam_enabled"] = steam.enabled
-                    if steam.target_temperature in STEAM_TEMP_TO_LEVEL:
-                        updates["steam_level"] = STEAM_TEMP_TO_LEVEL[
-                            steam.target_temperature
-                        ]
+            updates: dict = {
+                "connected": True,
+                "turned_on": mode == MachineMode.BREWING_MODE,
+            }
+
+            for boiler in boilers:
+                if boiler.id == BoilerType.COFFEE:
+                    updates["coffee_boiler_enabled"] = boiler.is_enabled
+                    updates["coffee_temp_target"] = float(boiler.target)
+                    updates["coffee_temp_current"] = float(boiler.current)
+                elif boiler.id == BoilerType.STEAM:
+                    updates["steam_enabled"] = boiler.is_enabled
+                    updates["steam_temp_target"] = float(boiler.target)
+                    if boiler.target in STEAM_TEMP_TO_LEVEL:
+                        updates["steam_level"] = STEAM_TEMP_TO_LEVEL[boiler.target]
 
             self._state = self._state.model_copy(update=updates)
             self._notify_change()
 
+        except Exception:
+            logger.exception("Failed to refresh state")
+            self._mark_disconnected()
+
         return self._state
 
     # -- Helpers --
+
+    async def _resolve_device(
+        self, device: BLEDevice | None, address: str | None
+    ) -> BLEDevice | None:
+        """Find a BLEDevice from an address or by scanning."""
+        if device is not None:
+            return device
+
+        if address is not None:
+            logger.info(f"La Marzocco: finding device at {address}")
+            found = await BleakScanner.find_device_by_address(address, timeout=15.0)
+            if found is None:
+                # Fall back to full scan (some bluez versions miss targeted scans)
+                logger.info("Targeted scan missed, trying full scan...")
+                devices = await BleakScanner.discover(timeout=10.0)
+                for d in devices:
+                    if d.address == address:
+                        return d
+                logger.error(f"Device not found at address {address}")
+            return found
+
+        logger.info("La Marzocco: scanning for devices...")
+        return next(iter(await self.scan()), None)
+
+    def _mark_disconnected(self) -> None:
+        """Mark state as disconnected after a BLE failure."""
+        self._state = self._state.model_copy(update={"connected": False})
+        self._client = None
+        self._notify_change()
 
     def _notify_change(self) -> None:
         if self._on_state_change:

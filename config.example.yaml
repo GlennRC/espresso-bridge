@@ -12,11 +12,17 @@ shotstopper:
   # Reconnect interval (seconds)
   reconnect_interval: 5
 
-# La Marzocco Linea Micra settings (Phase 2)
-# lamarzocco:
-#   serial_number: ""
-#   communication_key: ""
-#   username: ""
+# La Marzocco Linea Micra settings
+# Credentials required for BLE control — see docs/lamarzocco-setup.md
+lamarzocco:
+  # BLE address (leave empty to auto-scan)
+  address: ""
+  # Machine serial number (printed on machine or from La Marzocco app)
+  serial_number: ""
+  # La Marzocco app account username (email)
+  username: ""
+  # BLE communication key (one-time extraction — see setup guide)
+  communication_key: ""
 
 # Web server settings
 server:

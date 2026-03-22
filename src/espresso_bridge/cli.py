@@ -202,5 +202,190 @@ def config(
     _run(_config())
 
 
+# ── La Marzocco subcommands ──────────────────────────────────────────
+
+lm_app = typer.Typer(
+    name="lm",
+    help="La Marzocco Linea Micra controls",
+    no_args_is_help=True,
+)
+app.add_typer(lm_app, name="lm")
+
+
+def _load_lm_config():
+    """Load LM credentials from config.yaml."""
+    from pathlib import Path
+
+    import yaml
+
+    config_path = Path("config.yaml")
+    if not config_path.exists():
+        typer.echo(
+            "❌ config.yaml not found. Copy config.example.yaml and add LM credentials.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f)
+
+    lm = cfg.get("lamarzocco", {})
+    username = lm.get("username", "")
+    serial = lm.get("serial_number", "")
+    key = lm.get("communication_key", "")
+
+    if not all([username, serial, key]):
+        typer.echo(
+            "❌ Missing lamarzocco credentials in config.yaml "
+            "(username, serial_number, communication_key)",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    return username, serial, key
+
+
+@lm_app.command(name="scan")
+def lm_scan(timeout: float = typer.Option(8.0, help="Scan duration in seconds")):
+    """Scan for La Marzocco machines."""
+    from espresso_bridge.ble.lamarzocco import LaMarzoccoAdapter
+
+    async def _scan():
+        typer.echo(f"Scanning for La Marzocco machines ({timeout}s)...")
+        devices = await LaMarzoccoAdapter.scan(timeout=timeout)
+        if not devices:
+            typer.echo("No La Marzocco machines found.")
+            raise typer.Exit(1)
+        for d in devices:
+            typer.echo(f"  ☕ {d.name or 'Unknown'}  ({d.address})")
+        typer.echo(f"\nFound {len(devices)} machine(s).")
+
+    _run(_scan())
+
+
+@lm_app.command(name="status")
+def lm_status(address: str = typer.Option("", help="BLE address (auto-scan if empty)")):
+    """Read La Marzocco machine status."""
+    from espresso_bridge.ble.lamarzocco import LaMarzoccoAdapter
+
+    async def _status():
+        username, serial, key = _load_lm_config()
+        adapter = LaMarzoccoAdapter(username, serial, key)
+        addr = address or None
+
+        typer.echo("Connecting to La Marzocco...")
+        if not await adapter.connect_silent(address=addr):
+            typer.echo("Failed to connect.", err=True)
+            raise typer.Exit(1)
+
+        state = adapter.state
+        typer.echo(f"\n{'─' * 40}")
+        typer.echo("  La Marzocco Linea Micra")
+        typer.echo(f"{'─' * 40}")
+        typer.echo("  Connected:     ✅")
+        typer.echo(f"  Power:         {'🟢 On' if state.turned_on else '🔴 Off'}")
+        typer.echo(f"  Coffee Temp:   {state.coffee_temp_target}°C")
+        typer.echo(f"  Steam:         {'🟢 On' if state.steam_enabled else '🔴 Off'}")
+        typer.echo(f"  Steam Level:   {state.steam_level}")
+        typer.echo(f"{'─' * 40}")
+
+        await adapter.disconnect()
+
+    _run(_status())
+
+
+@lm_app.command(name="power")
+def lm_power(
+    on: bool = typer.Option(None, "--on/--off", help="Turn machine on or off"),
+):
+    """Control machine power."""
+    from espresso_bridge.ble.lamarzocco import LaMarzoccoAdapter
+
+    if on is None:
+        typer.echo("Specify --on or --off", err=True)
+        raise typer.Exit(1)
+
+    async def _power():
+        username, serial, key = _load_lm_config()
+        adapter = LaMarzoccoAdapter(username, serial, key)
+        typer.echo("Connecting to La Marzocco...")
+        if not await adapter.connect_silent():
+            typer.echo("Failed to connect.", err=True)
+            raise typer.Exit(1)
+
+        if await adapter.set_power(on):
+            typer.echo(f"✅ Machine powered {'on' if on else 'off'}")
+        else:
+            typer.echo("❌ Failed to set power", err=True)
+            raise typer.Exit(1)
+
+        await adapter.disconnect()
+
+    _run(_power())
+
+
+@lm_app.command(name="temp")
+def lm_temp(
+    celsius: float = typer.Argument(..., min=85.0, max=104.0, help="Brew boiler temp (85–104°C)"),
+):
+    """Set brew boiler temperature."""
+    from espresso_bridge.ble.lamarzocco import LaMarzoccoAdapter
+
+    async def _temp():
+        username, serial, key = _load_lm_config()
+        adapter = LaMarzoccoAdapter(username, serial, key)
+        typer.echo("Connecting to La Marzocco...")
+        if not await adapter.connect_silent():
+            typer.echo("Failed to connect.", err=True)
+            raise typer.Exit(1)
+
+        if await adapter.set_coffee_temp(celsius):
+            typer.echo(f"✅ Coffee boiler target: {celsius}°C")
+        else:
+            typer.echo("❌ Failed to set temperature", err=True)
+            raise typer.Exit(1)
+
+        await adapter.disconnect()
+
+    _run(_temp())
+
+
+@lm_app.command(name="steam")
+def lm_steam(
+    level: int = typer.Option(None, "--level", min=1, max=3, help="Steam level (1–3)"),
+    on: bool = typer.Option(None, "--on/--off", help="Enable/disable steam boiler"),
+):
+    """Control steam boiler."""
+    from espresso_bridge.ble.lamarzocco import LaMarzoccoAdapter
+
+    if level is None and on is None:
+        typer.echo("Specify --level or --on/--off", err=True)
+        raise typer.Exit(1)
+
+    async def _steam():
+        username, serial, key = _load_lm_config()
+        adapter = LaMarzoccoAdapter(username, serial, key)
+        typer.echo("Connecting to La Marzocco...")
+        if not await adapter.connect_silent():
+            typer.echo("Failed to connect.", err=True)
+            raise typer.Exit(1)
+
+        if on is not None:
+            if await adapter.set_steam_enabled(on):
+                typer.echo(f"✅ Steam boiler {'enabled' if on else 'disabled'}")
+            else:
+                typer.echo("❌ Failed to set steam", err=True)
+
+        if level is not None:
+            if await adapter.set_steam_level(level):
+                typer.echo(f"✅ Steam level: {level}")
+            else:
+                typer.echo("❌ Failed to set steam level", err=True)
+
+        await adapter.disconnect()
+
+    _run(_steam())
+
+
 if __name__ == "__main__":
     app()

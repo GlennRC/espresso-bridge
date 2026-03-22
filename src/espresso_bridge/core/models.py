@@ -44,3 +44,20 @@ class ShotStopperConfig(BaseModel):
     min_shot_duration: int | None = None
     max_shot_duration: int | None = None
     drip_delay: int | None = None
+
+
+class LaMarzoccoState(BaseModel):
+    """Live state of the La Marzocco Linea Micra."""
+
+    connected: bool = False
+    turned_on: bool = False
+
+    # Coffee boiler
+    coffee_boiler_enabled: bool = False
+    coffee_temp_target: float = Field(default=93.0, ge=85.0, le=104.0)
+    coffee_temp_current: float = 0.0
+
+    # Steam boiler
+    steam_enabled: bool = False
+    steam_level: int = Field(default=2, ge=1, le=3)
+    steam_temp_target: float = 128.0

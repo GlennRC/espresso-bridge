@@ -1,0 +1,35 @@
+[Unit]
+Description=Espresso Bridge Controller
+After=bluetooth.target network-online.target
+Wants=bluetooth.target network-online.target
+
+[Service]
+Type=simple
+User=glenn
+Group=glenn
+WorkingDirectory=/opt/espresso-bridge
+Environment=PATH=/opt/espresso-bridge/.venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=ESPRESSO_CONFIG=/etc/espresso-bridge/config.yaml
+ExecStart=/opt/espresso-bridge/.venv/bin/python -m espresso_bridge.main
+Restart=always
+RestartSec=5
+WatchdogSec=60
+
+# Resource limits for Pi Zero 2 W (512 MB)
+MemoryMax=200M
+MemoryHigh=150M
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=espresso-bridge
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/etc/espresso-bridge /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

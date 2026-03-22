@@ -104,16 +104,16 @@ class DeviceManager:
         """Connection loop for the ShotStopper."""
         cfg = self._config.shotstopper
         addr = cfg.address or None
+        failures = 0
 
         while self._running:
             if self._shotstopper.connected:
                 self._ss_phase = ConnectionPhase.CONNECTED
+                failures = 0
                 await asyncio.sleep(2.0)
                 continue
 
-            # Attempt connection (acquire scan lock to prevent BLE overlap)
             self._ss_phase = ConnectionPhase.SCANNING
-            logger.info("ShotStopper: scanning...")
 
             self._ss_phase = ConnectionPhase.CONNECTING
             async with self._scan_lock:
@@ -121,13 +121,18 @@ class DeviceManager:
 
             if success:
                 self._ss_phase = ConnectionPhase.CONNECTED
+                failures = 0
                 logger.info("ShotStopper: connected")
             else:
+                failures += 1
                 self._ss_phase = ConnectionPhase.DISCONNECTED
-                logger.warning(
-                    f"ShotStopper: connection failed, retrying in {cfg.reconnect_interval}s"
-                )
-                await asyncio.sleep(cfg.reconnect_interval)
+                # Exponential backoff: 5s, 10s, 20s, 30s max
+                delay = min(cfg.reconnect_interval * (2 ** (failures - 1)), 30.0)
+                if failures <= 3 or failures % 10 == 0:
+                    logger.warning(
+                        f"ShotStopper: connect failed #{failures}, retry in {delay:.0f}s"
+                    )
+                await asyncio.sleep(delay)
 
     # -- La Marzocco management --
 
@@ -143,11 +148,13 @@ class DeviceManager:
         cfg = self._config.lamarzocco
         addr = cfg.address or None
         interval = self._config.shotstopper.reconnect_interval
+        failures = 0
 
         while self._running:
             # Check actual BLE connection (not model state)
             if self._lamarzocco.connected:
                 self._lm_phase = ConnectionPhase.CONNECTED
+                failures = 0
                 # Refresh state every 10s (also validates connection is alive)
                 try:
                     await self._lamarzocco.refresh_state()
@@ -158,7 +165,6 @@ class DeviceManager:
                 continue
 
             self._lm_phase = ConnectionPhase.SCANNING
-            logger.info("La Marzocco: scanning...")
 
             self._lm_phase = ConnectionPhase.CONNECTING
             async with self._scan_lock:
@@ -166,8 +172,14 @@ class DeviceManager:
 
             if success:
                 self._lm_phase = ConnectionPhase.CONNECTED
+                failures = 0
                 logger.info("La Marzocco: connected")
             else:
+                failures += 1
                 self._lm_phase = ConnectionPhase.DISCONNECTED
-                logger.warning(f"La Marzocco: connection failed, retrying in {interval}s")
-                await asyncio.sleep(interval)
+                delay = min(interval * (2 ** (failures - 1)), 30.0)
+                if failures <= 3 or failures % 10 == 0:
+                    logger.warning(
+                        f"La Marzocco: connect failed #{failures}, retry in {delay:.0f}s"
+                    )
+                await asyncio.sleep(delay)

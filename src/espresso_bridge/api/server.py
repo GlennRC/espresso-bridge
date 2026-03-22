@@ -20,7 +20,7 @@ from espresso_bridge.core.state import StateStore
 
 logger = logging.getLogger(__name__)
 
-STATIC_DIR = Path(__file__).parent / "static"
+STATIC_DIR = Path(__file__).parent.parent / "static"
 
 
 # -- Request models (must be module-level for FastAPI) --

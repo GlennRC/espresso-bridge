@@ -14,24 +14,30 @@ The `communication_key` (also called the BLE token) is used to authenticate Blue
 
 ### Method 1: Via the La Marzocco Cloud API (Recommended)
 
-Use this Python snippet to fetch the key:
+Run this on the Pi (or any machine with espresso-bridge installed):
 
-```python
+```bash
+cd /opt/espresso-bridge
+source .venv/bin/activate
+python3 << 'EOF'
 import asyncio
 from lmcloud import LaMarzoccoCloudClient
 
 async def get_key():
-    client = LaMarzoccoCloudClient()
-    # This will prompt for La Marzocco app credentials
-    await client.login("your_email@example.com", "your_password")
+    email = input("La Marzocco app email: ")
+    password = input("La Marzocco app password: ")
 
-    # List your machines
-    machines = await client.list_machines()
-    for m in machines:
-        print(f"Serial: {m['serial_number']}")
-        print(f"Communication Key: {m['communication_key']}")
+    client = LaMarzoccoCloudClient(username=email, password=password)
+    fleet = await client.get_customer_fleet()
+
+    for serial, info in fleet.items():
+        print(f"\n  Machine:           {info.name}")
+        print(f"  Serial:            {info.serial_number}")
+        print(f"  Model:             {info.model}")
+        print(f"  Communication Key: {info.communication_key}")
 
 asyncio.run(get_key())
+EOF
 ```
 
 ### Method 2: Via mitmproxy (If Method 1 doesn't work)

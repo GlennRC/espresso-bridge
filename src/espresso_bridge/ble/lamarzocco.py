@@ -202,13 +202,20 @@ class LaMarzoccoAdapter:
                 bluetooth_client=self._bt_client,
             )
 
+            # Force actual BLE connection + auth now (while caller holds scan_lock)
+            # so it doesn't collide with ShotStopper scans later.
+            await self._bt_client._client.connect()
+            await self._bt_client._authenticate()
+
             self._state = self._state.model_copy(update={"connected": True})
             self._notify_change()
-            logger.info(f"Prepared La Marzocco connection ({device.name} @ {device.address})")
+            logger.info(f"Connected to La Marzocco ({device.name} @ {device.address})")
             return True
 
         except Exception:
             logger.exception("La Marzocco connect_silent failed")
+            self._bt_client = None
+            self._machine = None
             return False
 
     async def disconnect(self) -> None:

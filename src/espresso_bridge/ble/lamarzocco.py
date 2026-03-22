@@ -166,39 +166,50 @@ class LaMarzoccoAdapter:
         if not LMCLOUD_AVAILABLE:
             return False
 
-        if device is None and address is None:
-            devices = await self.scan()
-            if not devices:
-                logger.error("No La Marzocco machine found")
-                return False
-            device = devices[0]
+        try:
+            if device is None and address is not None:
+                logger.info(f"La Marzocco: finding device at {address}")
+                device = await BleakScanner.find_device_by_address(address, timeout=15.0)
+                if device is None:
+                    logger.error(f"Device not found at address {address}")
+                    return False
 
-        if device is None and address is not None:
-            device = await BleakScanner.find_device_by_address(address, timeout=10.0)
             if device is None:
-                logger.error(f"Device not found at address {address}")
-                return False
+                logger.info("La Marzocco: scanning for devices...")
+                all_devices = await BleakScanner.discover(timeout=10.0)
+                lm_prefixes = ("MICRA", "MINI", "GS3", "LM")
+                for d in all_devices:
+                    if d.name and any(d.name.startswith(p) for p in lm_prefixes):
+                        device = d
+                        break
+                if device is None:
+                    logger.error("No La Marzocco machine found")
+                    return False
 
-        self._device = device
+            self._device = device
 
-        self._bt_client = LaMarzoccoBluetoothClient(
-            username=self._username,
-            serial_number=self._serial_number,
-            token=self._communication_key,
-            address_or_ble_device=device,
-        )
+            self._bt_client = LaMarzoccoBluetoothClient(
+                username=self._username,
+                serial_number=self._serial_number,
+                token=self._communication_key,
+                address_or_ble_device=device,
+            )
 
-        self._machine = LaMarzoccoMachine(
-            model=MachineModel.LINEA_MICRA,
-            serial_number=self._serial_number,
-            name="Linea Micra",
-            bluetooth_client=self._bt_client,
-        )
+            self._machine = LaMarzoccoMachine(
+                model=MachineModel.LINEA_MICRA,
+                serial_number=self._serial_number,
+                name="Linea Micra",
+                bluetooth_client=self._bt_client,
+            )
 
-        self._state = self._state.model_copy(update={"connected": True})
-        self._notify_change()
-        logger.info(f"Prepared La Marzocco connection ({device.name})")
-        return True
+            self._state = self._state.model_copy(update={"connected": True})
+            self._notify_change()
+            logger.info(f"Prepared La Marzocco connection ({device.name} @ {device.address})")
+            return True
+
+        except Exception:
+            logger.exception("La Marzocco connect_silent failed")
+            return False
 
     async def disconnect(self) -> None:
         """Disconnect from the machine."""

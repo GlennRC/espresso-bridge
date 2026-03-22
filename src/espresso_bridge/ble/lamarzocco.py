@@ -95,15 +95,21 @@ class LaMarzoccoAdapter:
         On Linux/bluez, connecting by address works even if the device
         isn't actively advertising (uses cached device info).
         """
+        # Clean up any stale client from a previous attempt
+        if self._client is not None:
+            try:
+                await self._client.disconnect()
+            except Exception:
+                pass
+            self._client = None
+
         if device is None and address is not None:
-            # Try scanning first, but fall back to direct address connection
             device = await self._resolve_device(None, address)
 
         if device is None and address is None:
             device = await self._resolve_device(None, None)
 
         try:
-            # Use BLEDevice if found, otherwise connect directly by address
             target = device if device is not None else address
             if target is None:
                 logger.error("No device or address to connect to")

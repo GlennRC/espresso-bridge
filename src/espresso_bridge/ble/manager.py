@@ -141,9 +141,9 @@ class DeviceManager:
         interval = self._config.shotstopper.reconnect_interval
 
         while self._running:
-            if self._lamarzocco.connected:
+            if self._lamarzocco.state.connected:
                 self._lm_phase = ConnectionPhase.CONNECTED
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(5.0)
                 continue
 
             self._lm_phase = ConnectionPhase.SCANNING

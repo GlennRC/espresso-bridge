@@ -1,4 +1,4 @@
-/* espresso-bridge — touchscreen UI (800×480, dark theme) */
+/* espresso-bridge — touchscreen UI (dark theme, responsive) */
 
 :root {
   --bg: #1a1a1a;
@@ -14,11 +14,11 @@
   --radius: 12px;
 }
 
-* { margin: 0; padding: 0; box-sizing: border-box; }
+* { margin: 0; padding: 0; box-sizing: border-box; cursor: none !important; }
 
 html, body {
-  width: 800px;
-  height: 480px;
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--bg);
@@ -51,9 +51,20 @@ html, body {
 /* Main Layout */
 main {
   display: flex;
-  gap: 16px;
-  padding: 16px;
-  height: calc(480px - 36px);
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  height: calc(100vh - 36px);
+  overflow-y: auto;
+}
+
+/* Landscape: side-by-side */
+@media (orientation: landscape) {
+  main {
+    flex-direction: row;
+    gap: 16px;
+    padding: 16px;
+  }
 }
 
 /* Cards */
@@ -85,11 +96,18 @@ main {
   gap: 12px;
 }
 .weight-value {
-  font-size: 96px;
+  font-size: 72px;
   font-weight: 300;
   line-height: 1;
-  min-width: 140px;
+  min-width: 100px;
   text-align: center;
+}
+
+@media (orientation: landscape) {
+  .weight-value {
+    font-size: 96px;
+    min-width: 140px;
+  }
 }
 .weight-unit {
   font-size: 32px;

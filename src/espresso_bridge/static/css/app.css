@@ -17,8 +17,8 @@
 * { margin: 0; padding: 0; box-sizing: border-box; cursor: none !important; }
 
 html, body {
-  width: 480px;
-  height: 800px;
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--bg);
@@ -26,13 +26,6 @@ html, body {
   -webkit-user-select: none;
   user-select: none;
   touch-action: manipulation;
-}
-
-/* Rotate content 90° CW to match portrait screen orientation.
-   Chromium sees 800x480 (landscape) but we render 480x800 rotated. */
-body {
-  transform: rotate(90deg) translateY(-100%);
-  transform-origin: top left;
 }
 
 /* Status Bar */
@@ -61,7 +54,7 @@ main {
   flex-direction: column;
   gap: 12px;
   padding: 12px;
-  height: calc(800px - 36px);
+  height: calc(100vh - 36px);
   overflow-y: auto;
 }
 

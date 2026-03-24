@@ -48,7 +48,7 @@ html, body {
   50% { opacity: 0.4; }
 }
 
-/* Main Layout */
+/* Main Layout — portrait default (480x800 after rotation) */
 main {
   display: flex;
   flex-direction: column;
@@ -58,8 +58,8 @@ main {
   overflow-y: auto;
 }
 
-/* Landscape: side-by-side */
-@media (orientation: landscape) {
+/* Landscape: side-by-side (only when truly wider than tall) */
+@media (min-width: 700px) and (max-height: 500px) {
   main {
     flex-direction: row;
     gap: 16px;
@@ -103,7 +103,7 @@ main {
   text-align: center;
 }
 
-@media (orientation: landscape) {
+@media (min-width: 700px) and (max-height: 500px) {
   .weight-value {
     font-size: 96px;
     min-width: 140px;

@@ -22,11 +22,9 @@ sudo apt-get install -y -qq \
     python3-pip \
     bluez \
     bluetooth \
-    chromium-browser \
-    xdotool \
-    unclutter \
-    xserver-xorg \
-    xinit \
+    cage \
+    chromium \
+    wlr-randr \
     libdbus-1-dev \
     libglib2.0-dev \
     2>/dev/null
@@ -81,71 +79,62 @@ sudo systemctl daemon-reload
 sudo systemctl enable espresso-bridge.service
 echo "  Service enabled (will start on boot)"
 
-# --- Kiosk mode ---
+# --- Kiosk mode (cage + Chromium, portrait) ---
 echo "[7/7] Configuring kiosk mode..."
-KIOSK_DIR="/home/$SERVICE_USER"
 
-# Create .xinitrc for Chromium kiosk
-cat > "$KIOSK_DIR/.xinitrc" << 'XINITRC'
-#!/bin/sh
-# Disable screen blanking and power management
-xset s off
-xset -dpms
-xset s noblank
+# Install kiosk scripts
+sudo cp scripts/kiosk.sh "$INSTALL_DIR/kiosk.sh"
+sudo cp scripts/rotate.sh "$INSTALL_DIR/rotate.sh"
+sudo chmod +x "$INSTALL_DIR/kiosk.sh" "$INSTALL_DIR/rotate.sh"
 
-# Hide cursor after 3 seconds of inactivity
-unclutter -idle 3 -root &
+# Chromium policies (suppress low-RAM dialog, first-run, etc.)
+sudo mkdir -p /etc/chromium/policies/managed
+sudo tee /etc/chromium/policies/managed/kiosk.json > /dev/null << 'POLICY'
+{
+  "SuppressUnsupportedOSWarning": true,
+  "BrowserSignin": 0,
+  "DefaultBrowserSettingEnabled": false,
+  "MetricsReportingEnabled": false,
+  "PromotionalTabsEnabled": false,
+  "TranslateEnabled": false,
+  "BookmarkBarEnabled": false,
+  "PasswordManagerEnabled": false
+}
+POLICY
 
-# Wait for espresso-bridge service to be ready
-sleep 5
+# Touchscreen calibration for 90° portrait rotation (Waveshare 5" / QDtech MPI5001)
+sudo tee /etc/udev/rules.d/99-touchscreen-rotation.rules > /dev/null << 'UDEV'
+ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5750", ENV{LIBINPUT_CALIBRATION_MATRIX}="0 -1 1 1 0 0"
+UDEV
+sudo udevadm control --reload-rules
 
-# Launch Chromium in kiosk mode
-chromium-browser \
-    --noerrdialogs \
-    --disable-infobars \
-    --kiosk \
-    --incognito \
-    --disable-translate \
-    --disable-features=TranslateUI \
-    --disable-pinch \
-    --overscroll-history-navigation=0 \
-    --disable-session-crashed-bubble \
-    --disable-component-update \
-    --check-for-update-interval=31536000 \
-    --js-flags="--max-old-space-size=128" \
-    --disable-gpu-compositing \
-    --window-size=800,480 \
-    --window-position=0,0 \
-    http://localhost:8080
-XINITRC
-
-# Create systemd service for kiosk (auto-start X + Chromium)
-sudo tee /etc/systemd/system/espresso-kiosk.service > /dev/null << KIOSK
-[Unit]
-Description=Espresso Bridge Kiosk
-After=espresso-bridge.service
-Wants=espresso-bridge.service
-
+# Auto-login on tty1
+sudo mkdir -p /etc/systemd/system/getty@tty1.service.d
+sudo tee /etc/systemd/system/getty@tty1.service.d/autologin.conf > /dev/null << 'AUTOLOGIN'
 [Service]
-Type=simple
-User=$SERVICE_USER
-Environment=DISPLAY=:0
-ExecStartPre=/bin/sleep 3
-ExecStart=/usr/bin/xinit /home/$SERVICE_USER/.xinitrc -- :0 -nocursor
-Restart=on-failure
-RestartSec=5
+ExecStart=
+ExecStart=-/sbin/agetty --autologin glenn --noclear %I $TERM
+AUTOLOGIN
 
-[Install]
-WantedBy=graphical.target
-KIOSK
+# Launch kiosk from .bash_profile on tty1
+KIOSK_LINE='# Auto-start kiosk on tty1'
+PROFILE="/home/$SERVICE_USER/.bash_profile"
+if ! grep -q "$KIOSK_LINE" "$PROFILE" 2>/dev/null; then
+    cat >> "$PROFILE" << 'BASHPROFILE'
 
-sudo systemctl daemon-reload
-sudo systemctl enable espresso-kiosk.service
+# Auto-start kiosk on tty1
+if [ "$(tty)" = "/dev/tty1" ] && [ -z "$WAYLAND_DISPLAY" ]; then
+    exec /opt/espresso-bridge/kiosk.sh
+fi
+BASHPROFILE
+fi
 
-# --- Disable screen blanking at console level ---
+# Disable console screen blanking
 if ! grep -q "consoleblank=0" /boot/firmware/cmdline.txt 2>/dev/null; then
     sudo sed -i 's/$/ consoleblank=0/' /boot/firmware/cmdline.txt
 fi
+
+sudo systemctl daemon-reload
 
 echo ""
 echo "=== Setup Complete ==="
@@ -155,8 +144,6 @@ echo "  1. Edit /etc/espresso-bridge/config.yaml with your device addresses"
 echo "     - Run 'cd $INSTALL_DIR && .venv/bin/espresso scan' to find ShotStopper"
 echo "     - Run 'cd $INSTALL_DIR && .venv/bin/espresso lm scan' to find LM Micra"
 echo "  2. Start the service: sudo systemctl start espresso-bridge"
-echo "  3. Start the kiosk:   sudo systemctl start espresso-kiosk"
-echo "  4. Or just reboot:    sudo reboot"
+echo "  3. Reboot for kiosk:  sudo reboot"
 echo ""
 echo "Service logs: journalctl -u espresso-bridge -f"
-echo "Kiosk logs:   journalctl -u espresso-kiosk -f"

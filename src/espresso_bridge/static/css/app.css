@@ -362,11 +362,12 @@ html, body {
   border-bottom: none;
 }
 .day-name {
-  width: 44px;
-  font-size: 13px;
+  width: 36px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-dim);
   text-transform: uppercase;
+  flex-shrink: 0;
 }
 .day-toggle {
   width: 40px;
@@ -408,13 +409,13 @@ html, body {
   pointer-events: none;
 }
 .time-input {
-  width: 70px;
-  padding: 6px 4px;
+  width: 80px;
+  padding: 6px 2px;
   border-radius: 6px;
   border: 1px solid #444;
   background: #333;
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   text-align: center;
   -webkit-appearance: none;
 }

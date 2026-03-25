@@ -56,24 +56,38 @@ def main(config_path: str | None = None) -> None:
         datefmt="%H:%M:%S",
     )
 
-    logger.info("espresso-bridge starting")
+    mock_mode = os.environ.get("MOCK_BLE", "").lower() in ("1", "true", "yes")
+
+    logger.info("espresso-bridge starting%s", " (MOCK mode)" if mock_mode else "")
 
     # Resolve config path: explicit > env var > default
     if config_path is None:
         config_path = os.environ.get("ESPRESSO_CONFIG", "config.yaml")
 
     config = AppConfig.load(config_path)
+
+    # Allow port override via env
+    port = int(os.environ.get("PORT", config.server.port))
+
     logger.info(f"Config: {config_path}")
-    logger.info(f"Server: {config.server.host}:{config.server.port}")
-    logger.info(f"ShotStopper: {'address=' + config.shotstopper.address or 'auto-scan'}")
-    if config.lamarzocco.is_configured:
-        logger.info(f"La Marzocco: serial={config.lamarzocco.serial_number}")
-    else:
-        logger.info("La Marzocco: not configured")
+    logger.info(f"Server: {config.server.host}:{port}")
+
+    if mock_mode:
+        logger.info("BLE disabled — running with mock devices")
 
     # Create components
     store = StateStore()
-    manager = DeviceManager(config, store)
+
+    if mock_mode:
+        manager = _create_mock_manager(config)
+    else:
+        logger.info(f"ShotStopper: {'address=' + config.shotstopper.address or 'auto-scan'}")
+        if config.lamarzocco.is_configured:
+            logger.info(f"La Marzocco: serial={config.lamarzocco.serial_number}")
+        else:
+            logger.info("La Marzocco: not configured")
+        manager = DeviceManager(config, store)
+
     app = create_app(manager, store, config=config, watchdog_coro=_watchdog_loop)
 
     # Notify systemd we're ready
@@ -82,10 +96,42 @@ def main(config_path: str | None = None) -> None:
     uvicorn.run(
         app,
         host=config.server.host,
-        port=config.server.port,
+        port=port,
         log_level="info",
         access_log=False,
     )
+
+
+def _create_mock_manager(config: AppConfig):
+    """Create a mock DeviceManager that doesn't touch BLE."""
+    from unittest.mock import AsyncMock, MagicMock, PropertyMock
+
+    from espresso_bridge.ble.manager import ConnectionPhase
+
+    manager = MagicMock()
+    manager.ss_phase = ConnectionPhase.DISCONNECTED
+    manager.lm_phase = ConnectionPhase.CONNECTED
+    manager.start = AsyncMock()
+    manager.stop = AsyncMock()
+    manager.update_schedule = MagicMock(
+        side_effect=lambda s: setattr(config, "schedule", s)
+    )
+
+    # Mock LM adapter with set_power
+    lm = MagicMock()
+    lm.set_power = AsyncMock(return_value=True)
+    lm.set_coffee_temp = AsyncMock(return_value=True)
+    lm.set_steam_enabled = AsyncMock(return_value=True)
+    lm.set_steam_level = AsyncMock(return_value=True)
+    manager.lamarzocco = lm
+
+    # Mock ShotStopper
+    ss = MagicMock()
+    ss.set_weight = AsyncMock(return_value=True)
+    ss.apply_config = AsyncMock(return_value=True)
+    manager.shotstopper = ss
+
+    return manager
 
 
 if __name__ == "__main__":

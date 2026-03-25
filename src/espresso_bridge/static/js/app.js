@@ -33,7 +33,6 @@
     shotIndicator: document.getElementById('shot-indicator'),
     ssStatus: document.getElementById('ss-status'),
     lmStatus: document.getElementById('lm-status'),
-    scaleStatus: document.getElementById('scale-status'),
     lmPower: document.getElementById('lm-power'),
     coffeeTemp: document.getElementById('coffee-temp'),
     coffeeUp: document.getElementById('coffee-up'),
@@ -73,7 +72,6 @@
 
     setStatus(el.ssStatus, ss.connected);
     setStatus(el.lmStatus, lm.connected);
-    setStatus(el.scaleStatus, ss.scale_status === 1);
 
     el.lmPower.textContent = lm.turned_on ? 'ON' : 'OFF';
     el.lmPower.classList.toggle('on', lm.turned_on);

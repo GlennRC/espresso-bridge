@@ -74,7 +74,7 @@ def main(config_path: str | None = None) -> None:
     # Create components
     store = StateStore()
     manager = DeviceManager(config, store)
-    app = create_app(manager, store, watchdog_coro=_watchdog_loop)
+    app = create_app(manager, store, config=config, watchdog_coro=_watchdog_loop)
 
     # Notify systemd we're ready
     _sd_notify("READY=1")

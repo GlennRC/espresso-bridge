@@ -1,18 +1,20 @@
 """BLE device manager — coordinates adapter lifecycles.
 
 Handles scanning, connecting, health monitoring, and reconnection for both
-the ShotStopper and La Marzocco adapters.
+the ShotStopper and La Marzocco adapters. Also runs the schedule engine.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from enum import StrEnum
 
 from espresso_bridge.ble.lamarzocco import LaMarzoccoAdapter
 from espresso_bridge.ble.shotstopper import ShotStopperAdapter
 from espresso_bridge.core.config import AppConfig
+from espresso_bridge.core.models import ScheduleConfig
 from espresso_bridge.core.state import StateStore
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,7 @@ class DeviceManager:
         self._lm_phase = ConnectionPhase.DISCONNECTED
         self._running = False
         self._tasks: list[asyncio.Task] = []
+        self._last_fired: str | None = None  # schedule de-dup key
 
     @property
     def shotstopper(self) -> ShotStopperAdapter:
@@ -80,6 +83,9 @@ class DeviceManager:
             self._tasks.append(asyncio.create_task(self._manage_lamarzocco()))
         else:
             logger.info("La Marzocco not configured — skipping")
+
+        # Start schedule engine
+        self._tasks.append(asyncio.create_task(self._schedule_engine()))
 
     async def stop(self) -> None:
         """Stop the device manager and disconnect all devices."""
@@ -183,3 +189,72 @@ class DeviceManager:
                         f"La Marzocco: connect failed #{failures}, retry in {delay:.0f}s"
                     )
                 await asyncio.sleep(delay)
+
+    # -- Schedule engine --
+
+    def update_schedule(self, schedule: ScheduleConfig) -> None:
+        """Update the schedule config (called from API)."""
+        self._config.schedule = schedule
+        self._last_fired = None  # reset so new schedule can take effect immediately
+        logger.info(f"Schedule updated: enabled={schedule.enabled}")
+
+    async def _schedule_engine(self) -> None:
+        """Background loop: checks clock every 30s, fires set_power at scheduled times."""
+        logger.info("Schedule engine started")
+
+        while self._running:
+            try:
+                await self._check_schedule()
+            except Exception:
+                logger.exception("Schedule engine error")
+            await asyncio.sleep(30)
+
+    async def _check_schedule(self) -> None:
+        """Evaluate the schedule and fire power on/off if needed."""
+        sched = self._config.schedule
+        if not sched.enabled:
+            return
+
+        if not self._lamarzocco:
+            return
+
+        now = datetime.now()
+        today = sched.today_schedule(now)
+
+        if not today.enabled:
+            return
+
+        current_minutes = now.hour * 60 + now.minute
+        on_minutes = today.on_hour * 60 + today.on_minute
+        off_minutes = today.off_hour * 60 + today.off_minute
+
+        # Determine desired state
+        # Handle normal case (on_time < off_time)
+        if on_minutes < off_minutes:
+            should_be_on = on_minutes <= current_minutes < off_minutes
+        else:
+            # Wraps midnight (e.g., on=22:00, off=06:00)
+            should_be_on = current_minutes >= on_minutes or current_minutes < off_minutes
+
+        # Build a fire key to avoid re-triggering same event within the same minute
+        fire_key = f"{now.date().isoformat()}:{current_minutes}:{'on' if should_be_on else 'off'}"
+
+        if fire_key == self._last_fired:
+            return
+
+        # Only fire at transition boundaries (within 1 minute of on/off time)
+        at_on = abs(current_minutes - on_minutes) <= 1
+        at_off = abs(current_minutes - off_minutes) <= 1
+
+        if at_on and should_be_on:
+            logger.info(f"Schedule: turning machine ON ({today.on_hour:02d}:{today.on_minute:02d})")
+            ok = await self._lamarzocco.set_power(True)
+            if ok and today.steam:
+                await self._lamarzocco.set_steam_enabled(True)
+            self._last_fired = fire_key
+        elif at_off and not should_be_on:
+            logger.info(
+                f"Schedule: turning machine OFF ({today.off_hour:02d}:{today.off_minute:02d})"
+            )
+            await self._lamarzocco.set_power(False)
+            self._last_fired = fire_key

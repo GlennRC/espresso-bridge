@@ -17,6 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from espresso_bridge.ble.manager import DeviceManager
+from espresso_bridge.core.config import AppConfig
+from espresso_bridge.core.models import ScheduleConfig
 from espresso_bridge.core.state import StateStore
 
 logger = logging.getLogger(__name__)
@@ -57,6 +59,7 @@ class SteamRequest(BaseModel):
 def create_app(
     manager: DeviceManager,
     store: StateStore,
+    config: AppConfig | None = None,
     watchdog_coro=None,
 ) -> FastAPI:
     """Create the FastAPI application with device manager and state store injected."""
@@ -134,6 +137,34 @@ def create_app(
         if req.level is not None:
             results["steam_level"] = await manager.lamarzocco.set_steam_level(req.level)
         return {"ok": all(results.values()), **results}
+
+    # -- Schedule endpoints --
+
+    @app.get("/api/lm/schedule")
+    async def get_schedule():
+        """Get the full schedule config with current week indicator."""
+        sched = config.schedule if config else ScheduleConfig()
+        from datetime import datetime
+
+        now = datetime.now()
+        return {
+            "schedule": sched.model_dump(),
+            "current_week": sched.current_week(now.date()),
+            "next_event": sched.next_event(now),
+        }
+
+    @app.post("/api/lm/schedule")
+    async def set_schedule(new_sched: ScheduleConfig):
+        """Update the schedule config. Persists to config.yaml."""
+        if config:
+            config.save_schedule(new_sched)
+            manager.update_schedule(new_sched)
+        return {
+            "ok": True,
+            "schedule": new_sched.model_dump(),
+            "current_week": new_sched.current_week(),
+            "next_event": new_sched.next_event(),
+        }
 
     # -- WebSocket for live state --
 

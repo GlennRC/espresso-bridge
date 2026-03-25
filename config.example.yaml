@@ -28,3 +28,26 @@ lamarzocco:
 server:
   host: "0.0.0.0"
   port: 8080
+
+# Wake/sleep schedule (biweekly rotation)
+# Two week profiles (A/B) alternate automatically.
+# reference_date anchors which week is A (even weeks from this date = A, odd = B).
+schedule:
+  enabled: false
+  reference_date: ""  # ISO date of a known Week A Monday, e.g. "2025-01-06"
+  week_a:
+    monday:    { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+    tuesday:   { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+    wednesday: { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+    thursday:  { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+    friday:    { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+    saturday:  { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+    sunday:    { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+  week_b:
+    monday:    { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+    tuesday:   { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+    wednesday: { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+    thursday:  { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+    friday:    { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+    saturday:  { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }
+    sunday:    { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true }

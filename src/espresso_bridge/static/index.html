@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <title>espresso-bridge</title>
-  <link rel="stylesheet" href="/css/app.css?v=2">
+  <link rel="stylesheet" href="/css/app.css?v=3">
 </head>
 <body>
   <!-- Status Bar -->
@@ -14,52 +14,96 @@
     <span class="status-item" id="scale-status">● Scale</span>
   </header>
 
-  <!-- Main Dashboard -->
-  <main>
-    <!-- Weight Control -->
-    <section class="card weight-card">
-      <h2>Target Weight</h2>
-      <div class="weight-display">
-        <button class="weight-btn" id="weight-down">−</button>
-        <span class="weight-value" id="weight-value">36</span>
-        <span class="weight-unit">g</span>
-        <button class="weight-btn" id="weight-up">+</button>
-      </div>
-      <div class="weight-presets">
-        <button class="preset-btn" data-weight="30">30g</button>
-        <button class="preset-btn" data-weight="36">36g</button>
-        <button class="preset-btn" data-weight="40">40g</button>
-        <button class="preset-btn" data-weight="45">45g</button>
-      </div>
-      <div class="shot-indicator" id="shot-indicator">IDLE</div>
-    </section>
+  <!-- Views Container -->
+  <div id="views">
 
-    <!-- Machine Controls -->
-    <section class="card machine-card">
-      <h2>Linea Micra</h2>
-      <div class="control-row">
-        <label>Power</label>
-        <button class="toggle-btn" id="lm-power">OFF</button>
-      </div>
-      <div class="control-row">
-        <label>Coffee</label>
-        <div class="temp-control">
-          <button class="temp-btn" id="coffee-down">−</button>
-          <span id="coffee-temp">93.0</span><span class="unit">°C</span>
-          <button class="temp-btn" id="coffee-up">+</button>
+    <!-- Brew View (default) -->
+    <main id="brew-view" class="view active">
+      <!-- Weight Control -->
+      <section class="card weight-card">
+        <h2>Target Weight</h2>
+        <div class="weight-display">
+          <button class="weight-btn" id="weight-down">−</button>
+          <span class="weight-value" id="weight-value">36</span>
+          <span class="weight-unit">g</span>
+          <button class="weight-btn" id="weight-up">+</button>
         </div>
-      </div>
-      <div class="control-row">
-        <label>Steam</label>
-        <div class="steam-levels">
-          <button class="level-btn" data-level="1">1</button>
-          <button class="level-btn" data-level="2">2</button>
-          <button class="level-btn" data-level="3">3</button>
+        <div class="weight-presets">
+          <button class="preset-btn" data-weight="30">30g</button>
+          <button class="preset-btn" data-weight="36">36g</button>
+          <button class="preset-btn" data-weight="40">40g</button>
+          <button class="preset-btn" data-weight="45">45g</button>
         </div>
-      </div>
-    </section>
-  </main>
+        <div class="shot-indicator" id="shot-indicator">IDLE</div>
+      </section>
 
-  <script src="/js/app.js"></script>
+      <!-- Machine Controls -->
+      <section class="card machine-card">
+        <h2>Linea Micra</h2>
+        <div class="control-row">
+          <label>Power</label>
+          <button class="toggle-btn" id="lm-power">OFF</button>
+        </div>
+        <div class="control-row">
+          <label>Coffee</label>
+          <div class="temp-control">
+            <button class="temp-btn" id="coffee-down">−</button>
+            <span id="coffee-temp">93.0</span><span class="unit">°C</span>
+            <button class="temp-btn" id="coffee-up">+</button>
+          </div>
+        </div>
+        <div class="control-row">
+          <label>Steam</label>
+          <div class="steam-levels">
+            <button class="level-btn" data-level="1">1</button>
+            <button class="level-btn" data-level="2">2</button>
+            <button class="level-btn" data-level="3">3</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Schedule View -->
+    <main id="schedule-view" class="view">
+      <!-- Status Banner -->
+      <div class="card schedule-banner" id="schedule-banner">
+        <div class="banner-text" id="banner-text">Schedule not enabled</div>
+        <button class="toggle-btn banner-toggle" id="schedule-enable">ENABLE</button>
+      </div>
+
+      <!-- Week Selector -->
+      <div class="week-tabs">
+        <button class="week-tab active" data-week="a" id="week-a-tab">Week A</button>
+        <button class="week-tab" data-week="b" id="week-b-tab">Week B</button>
+        <span class="current-week-badge" id="current-week-badge">Current</span>
+      </div>
+
+      <!-- Day Rows -->
+      <div class="card schedule-days" id="schedule-days">
+        <!-- Populated by JS -->
+      </div>
+
+      <!-- Reference Date -->
+      <div class="card ref-date-row">
+        <label>Week A start</label>
+        <input type="date" id="ref-date" class="date-input">
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Bottom Tab Bar -->
+  <nav id="tab-bar">
+    <button class="tab active" data-view="brew-view">
+      <span class="tab-icon">☕</span>
+      <span class="tab-label">Brew</span>
+    </button>
+    <button class="tab" data-view="schedule-view">
+      <span class="tab-icon">⏰</span>
+      <span class="tab-label">Schedule</span>
+    </button>
+  </nav>
+
+  <script src="/js/app.js?v=3"></script>
 </body>
 </html>

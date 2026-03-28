@@ -320,7 +320,7 @@ class DeviceManager:
         """Update the schedule config (called from API)."""
         self._config.schedule = schedule
         self._last_fired = None  # reset so new schedule can take effect immediately
-        logger.info(f"Schedule updated: enabled={schedule.enabled}")
+        logger.info(f"Schedule updated: {len(schedule.schedules)} schedule(s)")
 
     async def _schedule_engine(self) -> None:
         """Background loop: checks clock every 30s, fires set_power at scheduled times."""

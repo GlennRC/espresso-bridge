@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <title>espresso-bridge</title>
-  <link rel="stylesheet" href="/css/app.css?v=4">
+  <link rel="stylesheet" href="/css/app.css?v=5">
 </head>
 <body>
   <!-- Status Bar -->
@@ -70,22 +70,25 @@
         <button class="toggle-btn banner-toggle" id="schedule-enable">ENABLE</button>
       </div>
 
-      <!-- Week Selector -->
-      <div class="week-tabs">
-        <button class="week-tab active" data-week="a" id="week-a-tab">Week A</button>
-        <button class="week-tab" data-week="b" id="week-b-tab">Week B</button>
-        <span class="current-week-badge" id="current-week-badge">Current</span>
-      </div>
-
-      <!-- Day Rows -->
-      <div class="card schedule-days" id="schedule-days">
+      <!-- Calendar Strip (vertical scroll, 28 days) -->
+      <div class="calendar-strip" id="calendar-strip">
         <!-- Populated by JS -->
       </div>
 
-      <!-- Reference Date -->
-      <div class="card ref-date-row">
-        <label>Week A start</label>
-        <input type="date" id="ref-date" class="date-input">
+      <!-- Settings row (collapsed) -->
+      <div class="card schedule-settings">
+        <div class="control-row">
+          <label>Wake time</label>
+          <input type="time" id="sched-wake-time" class="time-input" value="04:50">
+        </div>
+        <div class="control-row">
+          <label>Steam on wake</label>
+          <button class="day-toggle on" id="sched-steam-toggle"></button>
+        </div>
+        <div class="control-row">
+          <label>Cycle start</label>
+          <input type="date" id="ref-date" class="date-input">
+        </div>
       </div>
     </main>
 

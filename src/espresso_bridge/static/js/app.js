@@ -4,7 +4,8 @@
   'use strict';
 
   const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-  const DAY_LABELS = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' };
+  const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   // State
   let state = {
@@ -23,8 +24,6 @@
     next_event: null
   };
 
-  let activeWeekTab = 'a';
-
   // Elements
   const el = {
     weightValue: document.getElementById('weight-value'),
@@ -39,10 +38,9 @@
     coffeeDown: document.getElementById('coffee-down'),
     bannerText: document.getElementById('banner-text'),
     scheduleEnable: document.getElementById('schedule-enable'),
-    scheduleDays: document.getElementById('schedule-days'),
-    weekATab: document.getElementById('week-a-tab'),
-    weekBTab: document.getElementById('week-b-tab'),
-    currentWeekBadge: document.getElementById('current-week-badge'),
+    calendarStrip: document.getElementById('calendar-strip'),
+    schedWakeTime: document.getElementById('sched-wake-time'),
+    schedSteamToggle: document.getElementById('sched-steam-toggle'),
     refDate: document.getElementById('ref-date'),
   };
 
@@ -92,6 +90,43 @@
     el.classList.add(connected ? 'connected' : 'disconnected');
   }
 
+  // -- Schedule: date helpers --
+
+  function dateKey(d) {
+    // "YYYY-MM-DD"
+    return d.toISOString().slice(0, 10);
+  }
+
+  function isToday(d) {
+    const now = new Date();
+    return d.getFullYear() === now.getFullYear() &&
+           d.getMonth() === now.getMonth() &&
+           d.getDate() === now.getDate();
+  }
+
+  function getWeekLabel(d, refDate) {
+    // Determine week A or B from reference_date
+    if (!refDate) return 'a';
+    const ref = new Date(refDate + 'T00:00:00');
+    const diff = Math.floor((d - ref) / (7 * 86400000));
+    return diff % 2 === 0 ? 'a' : 'b';
+  }
+
+  function getDaySchedule(d, sched) {
+    // Get the DaySchedule for a given Date from the schedule config
+    const weekLabel = getWeekLabel(d, sched.reference_date);
+    const weekKey = weekLabel === 'a' ? 'week_a' : 'week_b';
+    const week = sched[weekKey] || {};
+    const dayName = DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1]; // JS 0=Sun
+    return { daySchedule: week[dayName] || { enabled: false }, weekLabel, dayName };
+  }
+
+  function formatTime12(h, m) {
+    const hr = h % 12 || 12;
+    const ampm = h < 12 ? 'AM' : 'PM';
+    return `${hr}:${String(m).padStart(2, '0')} ${ampm}`;
+  }
+
   // -- Schedule view render --
 
   function renderSchedule() {
@@ -106,120 +141,132 @@
     if (!enabled) {
       el.bannerText.textContent = 'Schedule not enabled';
     } else if (next) {
-      const dayLabel = DAY_LABELS[next.day] || next.day;
-      const h = next.hour % 12 || 12;
-      const ampm = next.hour < 12 ? 'AM' : 'PM';
-      const m = String(next.minute).padStart(2, '0');
+      const dayLabel = DAY_SHORT[DAYS.indexOf(next.day)] || next.day;
       const verb = next.type === 'on' ? 'Turns on' : 'Turns off';
-      el.bannerText.textContent = `${verb} ${dayLabel} at ${h}:${m} ${ampm}`;
+      el.bannerText.textContent = `${verb} ${dayLabel} at ${formatTime12(next.hour, next.minute)}`;
     } else {
       el.bannerText.textContent = 'No upcoming events';
     }
 
-    // Week tabs
-    el.weekATab.classList.toggle('active', activeWeekTab === 'a');
-    el.weekBTab.classList.toggle('active', activeWeekTab === 'b');
-
-    // Current week badge
-    const curWeek = scheduleState.current_week;
-    el.currentWeekBadge.classList.toggle('visible', true);
-    if (curWeek === activeWeekTab) {
-      el.currentWeekBadge.style.display = '';
-      el.currentWeekBadge.classList.add('visible');
-    } else {
-      el.currentWeekBadge.classList.remove('visible');
-    }
-
-    // Position badge on the active tab
-    const badge = el.currentWeekBadge;
-    if (curWeek === 'a') {
-      badge.style.left = '16px';
-      badge.style.right = '';
-    } else {
-      badge.style.left = '';
-      badge.style.right = '16px';
-    }
-
-    // Day rows
-    const weekKey = activeWeekTab === 'a' ? 'week_a' : 'week_b';
-    const week = sched[weekKey] || {};
-    renderDayRows(week);
-
     // Reference date
     el.refDate.value = sched.reference_date || '';
+
+    // Wake time (use first enabled day we find, or default)
+    let wakeH = 4, wakeM = 50, steamOn = true;
+    for (const wk of [sched.week_a, sched.week_b]) {
+      for (const day of DAYS) {
+        const ds = (wk || {})[day];
+        if (ds && ds.enabled) {
+          wakeH = ds.on_hour;
+          wakeM = ds.on_minute;
+          steamOn = ds.steam !== false;
+          break;
+        }
+      }
+    }
+    el.schedWakeTime.value = String(wakeH).padStart(2, '0') + ':' + String(wakeM).padStart(2, '0');
+    el.schedSteamToggle.classList.toggle('on', steamOn);
+
+    // Calendar strip — show 28 days from today
+    renderCalendarStrip(sched);
   }
 
-  function renderDayRows(week) {
-    el.scheduleDays.innerHTML = '';
+  function renderCalendarStrip(sched) {
+    const strip = el.calendarStrip;
+    strip.innerHTML = '';
 
-    DAYS.forEach(day => {
-      const ds = week[day] || { enabled: false, on_hour: 7, on_minute: 0, off_hour: 22, off_minute: 0, steam: true };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let lastWeekLabel = null;
+
+    for (let i = 0; i < 28; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+
+      const { daySchedule: ds, weekLabel } = getDaySchedule(d, sched);
+
+      // Week separator
+      if (weekLabel !== lastWeekLabel) {
+        const sep = document.createElement('div');
+        sep.className = 'cal-week-sep';
+        sep.textContent = 'Week ' + weekLabel.toUpperCase();
+        strip.appendChild(sep);
+        lastWeekLabel = weekLabel;
+      }
 
       const row = document.createElement('div');
-      row.className = 'day-row';
+      row.className = 'cal-day' + (ds.enabled ? ' on' : '') + (isToday(d) ? ' today' : '');
+      row.dataset.date = dateKey(d);
 
-      const nameEl = document.createElement('span');
-      nameEl.className = 'day-name';
-      nameEl.textContent = DAY_LABELS[day];
+      // Date column
+      const dateCol = document.createElement('div');
+      dateCol.className = 'cal-date';
+      const dateNum = document.createElement('div');
+      dateNum.className = 'cal-date-num';
+      dateNum.textContent = d.getDate();
+      const dateDay = document.createElement('div');
+      dateDay.className = 'cal-date-day';
+      const jsDay = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      dateDay.textContent = isToday(d) ? 'Today' : DAY_SHORT[jsDay];
+      dateCol.appendChild(dateNum);
+      dateCol.appendChild(dateDay);
 
-      const toggle = document.createElement('button');
-      toggle.className = 'day-toggle' + (ds.enabled ? ' on' : '');
-      toggle.addEventListener('click', () => {
-        ds.enabled = !ds.enabled;
-        toggle.classList.toggle('on', ds.enabled);
-        times.classList.toggle('disabled', !ds.enabled);
-        saveSchedule();
-      });
+      // Info column
+      const info = document.createElement('div');
+      info.className = 'cal-info';
 
-      const times = document.createElement('div');
-      times.className = 'day-times' + (ds.enabled ? '' : ' disabled');
+      const statusEl = document.createElement('span');
+      statusEl.className = 'cal-status';
+      statusEl.textContent = ds.enabled ? '● ON' : 'OFF';
 
-      const onInput = createTimeInput(ds.on_hour, ds.on_minute, (h, m) => {
-        ds.on_hour = h;
-        ds.on_minute = m;
-        saveSchedule();
-      });
-      const sep = document.createElement('span');
-      sep.className = 'time-sep';
-      sep.textContent = '→';
-      const offInput = createTimeInput(ds.off_hour, ds.off_minute, (h, m) => {
-        ds.off_hour = h;
-        ds.off_minute = m;
-        saveSchedule();
-      });
+      info.appendChild(statusEl);
 
-      times.appendChild(onInput);
-      times.appendChild(sep);
-      times.appendChild(offInput);
+      if (ds.enabled) {
+        const timeEl = document.createElement('span');
+        timeEl.className = 'cal-time';
+        timeEl.textContent = formatTime12(ds.on_hour || 0, ds.on_minute || 0);
+        info.appendChild(timeEl);
 
-      const steamBtn = document.createElement('button');
-      steamBtn.className = 'steam-toggle' + (ds.steam ? ' on' : '');
-      steamBtn.textContent = '♨';
-      steamBtn.title = 'Steam on wake';
-      steamBtn.addEventListener('click', () => {
-        ds.steam = !ds.steam;
-        steamBtn.classList.toggle('on', ds.steam);
-        saveSchedule();
-      });
+        if (ds.steam !== false) {
+          const steamEl = document.createElement('span');
+          steamEl.className = 'cal-steam';
+          steamEl.textContent = '♨';
+          info.appendChild(steamEl);
+        }
+      }
 
-      row.appendChild(nameEl);
-      row.appendChild(toggle);
-      row.appendChild(times);
-      row.appendChild(steamBtn);
-      el.scheduleDays.appendChild(row);
-    });
+      row.appendChild(dateCol);
+      row.appendChild(info);
+
+      // Tap to toggle
+      row.addEventListener('click', () => toggleDay(d, sched));
+
+      strip.appendChild(row);
+    }
+
+    // Scroll to today (first item, so already at top)
   }
 
-  function createTimeInput(hour, minute, onChange) {
-    const input = document.createElement('input');
-    input.type = 'time';
-    input.className = 'time-input';
-    input.value = String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0');
-    input.addEventListener('change', () => {
-      const [h, m] = input.value.split(':').map(Number);
-      if (!isNaN(h) && !isNaN(m)) onChange(h, m);
-    });
-    return input;
+  function toggleDay(date, sched) {
+    const { daySchedule: ds, weekLabel, dayName } = getDaySchedule(date, sched);
+    const weekKey = weekLabel === 'a' ? 'week_a' : 'week_b';
+
+    if (!sched[weekKey]) sched[weekKey] = {};
+    if (!sched[weekKey][dayName]) {
+      sched[weekKey][dayName] = { enabled: false, on_hour: 4, on_minute: 50, off_hour: 23, off_minute: 0, steam: true };
+    }
+
+    // Read current wake time from settings
+    const [wH, wM] = el.schedWakeTime.value.split(':').map(Number);
+    const steamOn = el.schedSteamToggle.classList.contains('on');
+
+    const day = sched[weekKey][dayName];
+    day.enabled = !day.enabled;
+    day.on_hour = wH || 4;
+    day.on_minute = wM || 50;
+    day.steam = steamOn;
+
+    saveSchedule();
   }
 
   // -- Schedule API --
@@ -227,10 +274,10 @@
   let saveTimeout = null;
 
   function saveSchedule() {
-    // Debounce saves (300ms)
     if (saveTimeout) clearTimeout(saveTimeout);
     saveTimeout = setTimeout(async () => {
-      const sched = buildSchedulePayload();
+      const sched = scheduleState.schedule;
+      sched.reference_date = el.refDate.value || '';
       const res = await api('POST', '/lm/schedule', sched);
       if (res.schedule) {
         scheduleState.schedule = res.schedule;
@@ -241,44 +288,12 @@
     }, 300);
   }
 
-  function buildSchedulePayload() {
-    const sched = scheduleState.schedule;
-    // Read day rows from DOM for active week
-    const weekKey = activeWeekTab === 'a' ? 'week_a' : 'week_b';
-    const weekData = {};
-
-    const rows = el.scheduleDays.querySelectorAll('.day-row');
-    rows.forEach((row, i) => {
-      const day = DAYS[i];
-      const enabled = row.querySelector('.day-toggle').classList.contains('on');
-      const timeInputs = row.querySelectorAll('.time-input');
-      const [onH, onM] = timeInputs[0].value.split(':').map(Number);
-      const [offH, offM] = timeInputs[1].value.split(':').map(Number);
-      const steam = row.querySelector('.steam-toggle').classList.contains('on');
-
-      weekData[day] = {
-        enabled,
-        on_hour: onH || 0,
-        on_minute: onM || 0,
-        off_hour: offH || 0,
-        off_minute: offM || 0,
-        steam
-      };
-    });
-
-    sched[weekKey] = weekData;
-    sched.reference_date = el.refDate.value || '';
-
-    return sched;
-  }
-
   async function loadSchedule() {
     const res = await api('GET', '/lm/schedule');
     if (res.schedule) {
       scheduleState.schedule = res.schedule;
       scheduleState.current_week = res.current_week || 'a';
       scheduleState.next_event = res.next_event;
-      activeWeekTab = scheduleState.current_week;
       renderSchedule();
     }
   }
@@ -388,14 +403,37 @@
     saveSchedule();
   });
 
-  // Week A/B tabs
-  el.weekATab.addEventListener('click', () => {
-    activeWeekTab = 'a';
-    renderSchedule();
+  // Wake time change — update all enabled days
+  el.schedWakeTime.addEventListener('change', () => {
+    const [h, m] = el.schedWakeTime.value.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return;
+    const sched = scheduleState.schedule;
+    for (const weekKey of ['week_a', 'week_b']) {
+      const week = sched[weekKey] || {};
+      for (const day of DAYS) {
+        if (week[day] && week[day].enabled) {
+          week[day].on_hour = h;
+          week[day].on_minute = m;
+        }
+      }
+    }
+    saveSchedule();
   });
-  el.weekBTab.addEventListener('click', () => {
-    activeWeekTab = 'b';
-    renderSchedule();
+
+  // Steam toggle
+  el.schedSteamToggle.addEventListener('click', () => {
+    const on = !el.schedSteamToggle.classList.contains('on');
+    el.schedSteamToggle.classList.toggle('on', on);
+    const sched = scheduleState.schedule;
+    for (const weekKey of ['week_a', 'week_b']) {
+      const week = sched[weekKey] || {};
+      for (const day of DAYS) {
+        if (week[day] && week[day].enabled) {
+          week[day].steam = on;
+        }
+      }
+    }
+    saveSchedule();
   });
 
   // Reference date

@@ -114,8 +114,8 @@ def create_app(
         if not ss.connected:
             return {"ok": False, "error": "ShotStopper not connected"}
         new_val = not ss.state.enabled
-        ok = await ss._write_field("enabled", new_val)
-        return {"ok": ok, "enabled": new_val}
+        ok = await ss.set_enabled(new_val)
+        return {"ok": ok, "enabled": ss.state.enabled}
 
     # -- La Marzocco endpoints --
 

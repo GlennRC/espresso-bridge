@@ -391,7 +391,7 @@ html, body {
 
 /* Wizard */
 .wizard {
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
   right: 0;
@@ -430,7 +430,6 @@ html, body {
   display: flex;
   gap: 12px;
   width: 100%;
-  margin-top: auto;
   padding-bottom: 8px;
 }
 .wiz-btn {

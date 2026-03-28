@@ -85,8 +85,16 @@ def main(config_path: str | None = None) -> None:
         if config.lamarzocco.is_configured:
             logger.info(f"La Marzocco: serial={config.lamarzocco.serial_number}")
         else:
-            logger.info("La Marzocco: not configured")
-        manager = DeviceManager(config, store)
+            logger.info("La Marzocco: BLE not configured")
+        if config.lm_cloud.is_configured:
+            logger.info("La Marzocco: cloud API configured (fallback enabled)")
+
+        manager_kwargs: dict = {}
+        if config.lm_cloud.is_configured:
+            manager_kwargs["lm_cloud_username"] = config.lm_cloud.username
+            manager_kwargs["lm_cloud_password"] = config.lm_cloud.password
+
+        manager = DeviceManager(config, store, **manager_kwargs)
 
     app = create_app(manager, store, config=config, watchdog_coro=_watchdog_loop)
 

@@ -205,16 +205,12 @@
     const scroller = container.querySelector('.wheel-scroller');
     scroller.innerHTML = '';
     const itemHeight = 44;
-    const visibleItems = Math.round(container.offsetHeight / itemHeight);
-    const padCount = Math.floor(visibleItems / 2);
+    const containerHeight = container.offsetHeight || 180;
+    // CSS padding centers the first/last item in the highlight zone
+    const padPx = (containerHeight - itemHeight) / 2;
+    scroller.style.paddingTop = padPx + 'px';
+    scroller.style.paddingBottom = padPx + 'px';
 
-    // Pad top/bottom for centering
-    for (let i = 0; i < padCount; i++) {
-      const pad = document.createElement('div');
-      pad.className = 'wheel-item';
-      pad.style.visibility = 'hidden';
-      scroller.appendChild(pad);
-    }
     items.forEach((text, idx) => {
       const item = document.createElement('div');
       item.className = 'wheel-item';
@@ -222,12 +218,6 @@
       item.dataset.idx = idx;
       scroller.appendChild(item);
     });
-    for (let i = 0; i < padCount; i++) {
-      const pad = document.createElement('div');
-      pad.className = 'wheel-item';
-      pad.style.visibility = 'hidden';
-      scroller.appendChild(pad);
-    }
 
     let currentIdx = selectedIndex;
     let startY = 0, startOffset = 0, dragging = false;
@@ -375,15 +365,61 @@
 
     if (rec === 'once') {
       el.wizDaysTitle.textContent = '📋 Pick Date';
-      const input = document.createElement('input');
-      input.type = 'date';
-      input.className = 'date-input';
-      input.value = wizState.date || new Date().toISOString().split('T')[0];
-      input.style.width = '100%';
-      input.style.fontSize = '20px';
-      input.style.padding = '12px';
-      input.addEventListener('change', () => { wizState.date = input.value; });
-      content.appendChild(input);
+      // Parse existing date or use today
+      const d = wizState.date ? new Date(wizState.date + 'T00:00:00') : new Date();
+      const selMonth = d.getMonth();
+      const selDay = d.getDate() - 1;
+      const selYear = d.getFullYear();
+
+      const row = document.createElement('div');
+      row.className = 'wheel-row';
+
+      // Month wheel
+      const monthContainer = document.createElement('div');
+      monthContainer.className = 'wheel-picker wheel-picker-md';
+      monthContainer.innerHTML = '<div class="wheel-highlight"></div><div class="wheel-scroller"></div>';
+      row.appendChild(monthContainer);
+
+      // Day wheel
+      const dayContainer = document.createElement('div');
+      dayContainer.className = 'wheel-picker';
+      dayContainer.innerHTML = '<div class="wheel-highlight"></div><div class="wheel-scroller"></div>';
+      row.appendChild(dayContainer);
+
+      // Year wheel
+      const yearContainer = document.createElement('div');
+      yearContainer.className = 'wheel-picker wheel-picker-md';
+      yearContainer.innerHTML = '<div class="wheel-highlight"></div><div class="wheel-scroller"></div>';
+      row.appendChild(yearContainer);
+
+      content.appendChild(row);
+
+      const years = Array.from({length: 5}, (_, i) => String(selYear + i - 1));
+      const yearBaseIdx = 1; // current year at index 1
+
+      let pickedMonth = selMonth;
+      let pickedDay = selDay;
+      let pickedYear = selYear;
+
+      function updateDate() {
+        const m = String(pickedMonth + 1).padStart(2, '0');
+        const dd = String(pickedDay + 1).padStart(2, '0');
+        wizState.date = `${pickedYear}-${m}-${dd}`;
+      }
+
+      wizWheels.dateMonth = createWheel(monthContainer, MONTH_SHORT, selMonth, (idx) => {
+        pickedMonth = idx;
+        updateDate();
+      });
+      wizWheels.dateDay = createWheel(dayContainer, Array.from({length: 31}, (_, i) => String(i + 1)), selDay, (idx) => {
+        pickedDay = idx;
+        updateDate();
+      });
+      wizWheels.dateYear = createWheel(yearContainer, years, yearBaseIdx, (idx) => {
+        pickedYear = parseInt(years[idx]);
+        updateDate();
+      });
+      updateDate();
 
     } else if (rec === 'daily') {
       el.wizDaysTitle.textContent = '📋 Every Day';
@@ -493,7 +529,7 @@
     }
   }
 
-  function saveWizard() {
+  async function saveWizard() {
     // Convert 12h → 24h
     let h24 = wizState._h12;
     if (wizState._isPM && h24 !== 12) h24 += 12;
@@ -515,12 +551,12 @@
       month_days: wizState.month_days || []
     };
 
-    if (editingSchedule) {
-      updateSchedule(editingSchedule, sched);
-    } else {
-      createSchedule(sched);
-    }
     closeWizard();
+    if (editingSchedule) {
+      await updateSchedule(editingSchedule, sched);
+    } else {
+      await createSchedule(sched);
+    }
   }
 
   function autoName() {

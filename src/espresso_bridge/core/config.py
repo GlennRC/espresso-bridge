@@ -42,6 +42,16 @@ class LaMarzoccoConfig:
 
 
 @dataclass
+class LMCloudConfig:
+    username: str = ""
+    password: str = ""
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.username and self.password)
+
+
+@dataclass
 class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8080
@@ -51,6 +61,7 @@ class ServerConfig:
 class AppConfig:
     shotstopper: ShotStopperConfig = field(default_factory=ShotStopperConfig)
     lamarzocco: LaMarzoccoConfig = field(default_factory=LaMarzoccoConfig)
+    lm_cloud: LMCloudConfig = field(default_factory=LMCloudConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     _config_path: Path = field(default=DEFAULT_CONFIG_PATH, repr=False)
@@ -68,6 +79,7 @@ class AppConfig:
 
         ss = raw.get("shotstopper", {})
         lm = raw.get("lamarzocco", {})
+        lmc = raw.get("lm_cloud", {})
         srv = raw.get("server", {})
         sched = raw.get("schedule", {})
 
@@ -83,6 +95,10 @@ class AppConfig:
                 serial_number=lm.get("serial_number", ""),
                 username=lm.get("username", ""),
                 communication_key=lm.get("communication_key", ""),
+            ),
+            lm_cloud=LMCloudConfig(
+                username=lmc.get("username", ""),
+                password=lmc.get("password", ""),
             ),
             server=ServerConfig(
                 host=srv.get("host", "0.0.0.0"),

@@ -470,6 +470,9 @@ html, body {
 .wheel-picker-sm {
   width: 60px;
 }
+.wheel-picker-md {
+  width: 100px;
+}
 .wheel-picker-lg {
   width: 220px;
   height: 200px;

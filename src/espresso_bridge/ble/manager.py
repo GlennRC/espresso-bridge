@@ -13,6 +13,7 @@ from enum import StrEnum
 
 from espresso_bridge.ble.lamarzocco import LaMarzoccoAdapter
 from espresso_bridge.ble.shotstopper import ShotStopperAdapter
+from espresso_bridge.cloud.lamarzocco import LaMarzoccoCloudAdapter
 from espresso_bridge.core.config import AppConfig
 from espresso_bridge.core.models import ScheduleConfig
 from espresso_bridge.core.state import StateStore
@@ -30,7 +31,13 @@ class ConnectionPhase(StrEnum):
 class DeviceManager:
     """Manages BLE connections for ShotStopper and La Marzocco."""
 
-    def __init__(self, config: AppConfig, store: StateStore) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        store: StateStore,
+        lm_cloud_username: str = "",
+        lm_cloud_password: str = "",
+    ) -> None:
         self._config = config
         self._store = store
         self._scan_lock = asyncio.Lock()  # BLE adapter only supports one scan at a time
@@ -38,15 +45,33 @@ class DeviceManager:
         self._shotstopper = ShotStopperAdapter(
             on_state_change=store.update_shotstopper,
         )
-        self._lamarzocco: LaMarzoccoAdapter | None = None
+        self._lamarzocco: LaMarzoccoAdapter | LaMarzoccoCloudAdapter | None = None
+        self._ble_adapter: LaMarzoccoAdapter | None = None
+        self._cloud_adapter: LaMarzoccoCloudAdapter | None = None
+        self._using_cloud = False
 
         if config.lamarzocco.is_configured:
-            self._lamarzocco = LaMarzoccoAdapter(
+            self._ble_adapter = LaMarzoccoAdapter(
                 username=config.lamarzocco.username,
                 serial_number=config.lamarzocco.serial_number,
                 communication_key=config.lamarzocco.communication_key,
                 on_state_change=store.update_lamarzocco,
             )
+
+        if lm_cloud_username and lm_cloud_password:
+            self._cloud_adapter = LaMarzoccoCloudAdapter(
+                username=lm_cloud_username,
+                password=lm_cloud_password,
+                on_state_change=store.update_lamarzocco,
+            )
+
+        # Cloud is primary when configured; BLE is fallback.
+        # If only BLE is configured, use BLE as primary (original behavior).
+        if self._cloud_adapter:
+            self._lamarzocco = self._cloud_adapter
+            self._using_cloud = True
+        elif self._ble_adapter:
+            self._lamarzocco = self._ble_adapter
 
         self._ss_phase = ConnectionPhase.DISCONNECTED
         self._lm_phase = ConnectionPhase.DISCONNECTED
@@ -99,8 +124,10 @@ class DeviceManager:
         self._tasks.clear()
 
         await self._shotstopper.disconnect()
-        if self._lamarzocco:
-            await self._lamarzocco.disconnect()
+        if self._ble_adapter:
+            await self._ble_adapter.disconnect()
+        if self._cloud_adapter:
+            await self._cloud_adapter.disconnect()
 
         logger.info("Device manager stopped")
 
@@ -149,10 +176,14 @@ class DeviceManager:
     async def _manage_lamarzocco(self) -> None:
         """Connection loop for the La Marzocco.
 
-        Once connected, periodically refreshes state from the machine.
-        Detects BLE disconnects and reconnects automatically.
-        After repeated failures, resets the bluetooth adapter to recover
-        from stale bluez state.
+        Priority: cloud API first (more reliable on Pi Zero 2 W), BLE as
+        local fallback when internet is unavailable.
+
+        - Try cloud first when credentials are configured
+        - If cloud fails, fall back to BLE immediately
+        - If cloud drops mid-session, try BLE while cloud reconnects
+        - When cloud reconnects, switch back from BLE
+        - If only BLE is configured, use BLE-only (original behavior)
         """
         if not self._lamarzocco:
             return
@@ -161,44 +192,86 @@ class DeviceManager:
         addr = cfg.address or None
         interval = self._config.shotstopper.reconnect_interval
         failures = 0
+        ble_fallback_threshold = 3
 
         while self._running:
-            # Check actual BLE connection (not model state)
-            if self._lamarzocco.connected:
+            # --- Cloud connected path (primary) ---
+            if self._cloud_adapter and self._cloud_adapter.connected:
+                if not self._using_cloud:
+                    # Cloud reconnected while we were on BLE — switch back
+                    logger.info("La Marzocco: cloud reconnected, switching back from BLE")
+                    if self._ble_adapter:
+                        await self._ble_adapter.disconnect()
+                    self._lamarzocco = self._cloud_adapter
+                    self._using_cloud = True
+
                 self._lm_phase = ConnectionPhase.CONNECTED
                 failures = 0
-                # Refresh state every 10s (also validates connection is alive)
+                await asyncio.sleep(30.0)
+                continue
+
+            # --- BLE connected path (fallback) ---
+            if self._ble_adapter and self._ble_adapter.connected:
+                self._lm_phase = ConnectionPhase.CONNECTED
+                failures = 0
                 try:
-                    await self._lamarzocco.refresh_state()
+                    await self._ble_adapter.refresh_state()
                 except Exception:
                     logger.warning("La Marzocco: BLE connection lost during refresh")
                     self._lm_phase = ConnectionPhase.DISCONNECTED
+
+                # While on BLE fallback, periodically try to reconnect cloud
+                if self._cloud_adapter and not self._using_cloud:
+                    cloud_ok = await self._cloud_adapter.connect()
+                    if cloud_ok:
+                        continue  # next iteration picks up cloud connected path
+
                 await asyncio.sleep(10.0)
                 continue
 
-            self._lm_phase = ConnectionPhase.SCANNING
-
-            # After 5 consecutive failures, reset bluetooth adapter
-            if failures > 0 and failures % 5 == 0:
-                await self._reset_bluetooth_adapter()
-
+            # --- Disconnected: try cloud first, then BLE ---
             self._lm_phase = ConnectionPhase.CONNECTING
-            async with self._scan_lock:
-                success = await self._lamarzocco.connect_silent(address=addr)
 
-            if success:
-                self._lm_phase = ConnectionPhase.CONNECTED
-                failures = 0
-                logger.info("La Marzocco: connected")
-            else:
-                failures += 1
-                self._lm_phase = ConnectionPhase.DISCONNECTED
-                delay = min(interval * (2 ** (failures - 1)), 30.0)
-                if failures <= 3 or failures % 5 == 0:
-                    logger.warning(
-                        f"La Marzocco: connect failed #{failures}, retry in {delay:.0f}s"
+            # Try cloud (primary)
+            if self._cloud_adapter:
+                cloud_ok = await self._cloud_adapter.connect()
+                if cloud_ok:
+                    self._lamarzocco = self._cloud_adapter
+                    self._using_cloud = True
+                    self._lm_phase = ConnectionPhase.CONNECTED
+                    failures = 0
+                    logger.info("La Marzocco: cloud connected")
+                    continue
+
+            # Cloud failed — try BLE (fallback)
+            if self._ble_adapter:
+                if failures > 0 and failures % 5 == 0:
+                    await self._reset_bluetooth_adapter()
+
+                self._lm_phase = ConnectionPhase.SCANNING
+                async with self._scan_lock:
+                    ble_ok = await self._ble_adapter.connect_silent(address=addr)
+
+                if ble_ok:
+                    self._lamarzocco = self._ble_adapter
+                    self._using_cloud = False
+                    self._lm_phase = ConnectionPhase.CONNECTED
+                    failures = 0
+                    logger.info(
+                        "La Marzocco: cloud failed, falling back to BLE"
+                        if self._cloud_adapter else
+                        "La Marzocco: connected via BLE"
                     )
-                await asyncio.sleep(delay)
+                    continue
+
+            failures += 1
+            self._lm_phase = ConnectionPhase.DISCONNECTED
+            delay = min(interval * (2 ** (failures - 1)), 30.0)
+            if failures <= 3 or failures % 5 == 0:
+                logger.warning(
+                    f"La Marzocco: connect failed #{failures}, retry in {delay:.0f}s"
+                )
+            await asyncio.sleep(delay)
 
     # -- Bluetooth adapter reset --
 

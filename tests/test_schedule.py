@@ -1,269 +1,256 @@
-"""Tests for the flexible schedule models, config migration, and API endpoints."""
+"""Tests for the Schedule models, config migration, persistence, and API endpoints."""
 
 from datetime import date, datetime, time
 
 import pytest
 
-from espresso_bridge.core.models import (
-    RecurringRule,
-    ScheduleConfig,
-    ScheduleEntry,
-)
+from espresso_bridge.core.models import Schedule, ScheduleConfig
 
 
-# -- ScheduleEntry --
+# -- Schedule model --
 
 
-class TestScheduleEntry:
+class TestSchedule:
     def test_defaults(self):
-        e = ScheduleEntry()
-        assert e.wake_hour == 4
-        assert e.wake_minute == 50
-        assert e.off_hour == 23
-        assert e.off_minute == 0
-        assert e.steam is True
+        s = Schedule()
+        assert s.id == ""
+        assert s.name == ""
+        assert s.enabled is True
+        assert s.wake_hour == 4
+        assert s.wake_minute == 50
+        assert s.off_hour == 23
+        assert s.off_minute == 0
+        assert s.steam is True
+        assert s.recurrence == "weekly"
 
     def test_time_properties(self):
-        e = ScheduleEntry(wake_hour=6, wake_minute=30, off_hour=21, off_minute=45)
-        assert e.wake_time == time(6, 30)
-        assert e.off_time == time(21, 45)
+        s = Schedule(wake_hour=6, wake_minute=30, off_hour=21, off_minute=45)
+        assert s.wake_time == time(6, 30)
+        assert s.off_time == time(21, 45)
 
-    def test_validation(self):
-        with pytest.raises(Exception):
-            ScheduleEntry(wake_hour=25)
-        with pytest.raises(Exception):
-            ScheduleEntry(wake_minute=60)
+    def test_fires_on_once(self):
+        s = Schedule(recurrence="once", date="2026-04-15")
+        assert s.fires_on(date(2026, 4, 15)) is True
+        assert s.fires_on(date(2026, 4, 16)) is False
 
+    def test_fires_on_daily(self):
+        s = Schedule(recurrence="daily")
+        assert s.fires_on(date(2026, 4, 15)) is True
+        assert s.fires_on(date(2026, 4, 16)) is True
+        assert s.fires_on(date(2026, 1, 1)) is True
 
-# -- RecurringRule --
+    def test_fires_on_weekly(self):
+        s = Schedule(recurrence="weekly", days=["monday", "friday"])
+        assert s.fires_on(date(2026, 3, 30)) is True   # Monday
+        assert s.fires_on(date(2026, 4, 3)) is True    # Friday
+        assert s.fires_on(date(2026, 3, 31)) is False   # Tuesday
 
-
-class TestRecurringRule:
-    def test_weekly_generates(self):
-        rule = RecurringRule(
-            id="work", name="Work days", type="weekly",
-            days=["monday", "friday"], entry=ScheduleEntry(),
-        )
-        assert rule.generates(date(2026, 3, 30)) is True   # Monday
-        assert rule.generates(date(2026, 4, 3)) is True    # Friday
-        assert rule.generates(date(2026, 4, 1)) is False   # Wednesday
-
-    def test_biweekly_generates_week_a(self):
-        # reference_date 2026-03-30 is a Monday (week A)
-        rule = RecurringRule(
-            id="bi", name="Biweekly", type="biweekly",
+    def test_fires_on_biweekly(self):
+        # reference_date 2026-03-30 is a Monday (week A start)
+        s = Schedule(
+            recurrence="biweekly",
             reference_date="2026-03-30",
-            days=["saturday", "sunday"], days_b=[],
-            entry=ScheduleEntry(),
+            days=["saturday", "sunday"],
+            days_b=["monday", "tuesday"],
         )
-        # Apr 4 (Sat) is in week A (same week as ref) → generates
-        assert rule.generates(date(2026, 4, 4)) is True
-        # Apr 11 (Sat) is in week B → does not generate
-        assert rule.generates(date(2026, 4, 11)) is False
+        # Week A (same week as ref): Sat Apr 4, Sun Apr 5
+        assert s.fires_on(date(2026, 4, 4)) is True   # Sat week A
+        assert s.fires_on(date(2026, 4, 5)) is True   # Sun week A
+        # Week B (next week): Mon Apr 6, Tue Apr 7
+        assert s.fires_on(date(2026, 4, 6)) is True   # Mon week B
+        assert s.fires_on(date(2026, 4, 7)) is True   # Tue week B
+        # Week B Sat → not in days_b
+        assert s.fires_on(date(2026, 4, 11)) is False  # Sat week B
+        # Week A Mon → not in days (week A)
+        assert s.fires_on(date(2026, 3, 30)) is False  # Mon week A
 
-    def test_biweekly_generates_week_b(self):
-        rule = RecurringRule(
-            id="bi", name="Biweekly", type="biweekly",
-            reference_date="2026-03-30",
-            days=["saturday"], days_b=["monday", "tuesday"],
-            entry=ScheduleEntry(),
+    def test_fires_on_monthly(self):
+        s = Schedule(recurrence="monthly", month_days=[1, 15])
+        assert s.fires_on(date(2026, 4, 1)) is True
+        assert s.fires_on(date(2026, 4, 15)) is True
+        assert s.fires_on(date(2026, 4, 2)) is False
+
+    def test_fires_on_disabled(self):
+        s = Schedule(enabled=False, recurrence="daily")
+        assert s.fires_on(date(2026, 4, 15)) is False
+        assert s.fires_on(date(2026, 4, 16)) is False
+
+    def test_summary_formats(self):
+        assert "Once" in Schedule(recurrence="once", date="2026-04-15").summary()
+        assert "Daily" in Schedule(recurrence="daily").summary()
+
+        weekly = Schedule(recurrence="weekly", days=["monday", "friday"])
+        s = weekly.summary()
+        assert "Weekly" in s
+        assert "Mon" in s
+        assert "Fri" in s
+
+        biweekly = Schedule(
+            recurrence="biweekly",
+            days=["saturday"], days_b=["monday"],
         )
-        # Apr 6 (Mon) is in week B → generates via days_b
-        assert rule.generates(date(2026, 4, 6)) is True
+        assert "Biweekly" in biweekly.summary()
+        assert "2 days" in biweekly.summary()
 
-    def test_no_reference_date(self):
-        rule = RecurringRule(
-            id="bi", name="Biweekly", type="biweekly",
-            reference_date="", days=["monday"],
-            entry=ScheduleEntry(),
-        )
-        assert rule.generates(date(2026, 3, 30)) is False
+        monthly = Schedule(recurrence="monthly", month_days=[1, 15])
+        assert "Monthly" in monthly.summary()
+        assert "2 days" in monthly.summary()
 
 
-# -- ScheduleConfig.resolve --
+# -- ScheduleConfig --
 
 
-class TestScheduleResolve:
-    def test_empty_schedule(self):
+class TestScheduleConfig:
+    def test_resolve_empty(self):
         sc = ScheduleConfig()
-        entry, source = sc.resolve(date(2026, 4, 1))
-        assert entry is None
-        assert source == ""
+        assert sc.resolve(date(2026, 4, 1)) is None
 
-    def test_rule_match(self):
-        rule = RecurringRule(
-            id="daily", name="Daily", type="weekly",
-            days=["wednesday"], entry=ScheduleEntry(wake_hour=5),
-        )
-        sc = ScheduleConfig(rules=[rule])
-        entry, source = sc.resolve(date(2026, 4, 1))  # Wednesday
-        assert entry is not None
-        assert entry.wake_hour == 5
-        assert source == "rule:daily"
+    def test_resolve_finds_match(self):
+        s1 = Schedule(id="a", recurrence="weekly", days=["wednesday"], wake_hour=5)
+        s2 = Schedule(id="b", recurrence="weekly", days=["wednesday"], wake_hour=9)
+        sc = ScheduleConfig(schedules=[s1, s2])
+        result = sc.resolve(date(2026, 4, 1))  # Wednesday
+        assert result is not None
+        assert result.id == "a"
+        assert result.wake_hour == 5
 
-    def test_event_override(self):
-        rule = RecurringRule(
-            id="daily", name="Daily", type="weekly",
-            days=["wednesday"], entry=ScheduleEntry(wake_hour=5),
-        )
-        manual = ScheduleEntry(wake_hour=9)
-        sc = ScheduleConfig(
-            rules=[rule],
-            events={"2026-04-01": manual},
-        )
-        entry, source = sc.resolve(date(2026, 4, 1))  # Wednesday
-        assert entry.wake_hour == 9
-        assert source == "manual"
+    def test_resolve_skips_disabled(self):
+        s1 = Schedule(id="off", enabled=False, recurrence="daily")
+        s2 = Schedule(id="on", enabled=True, recurrence="daily", wake_hour=7)
+        sc = ScheduleConfig(schedules=[s1, s2])
+        result = sc.resolve(date(2026, 4, 1))
+        assert result is not None
+        assert result.id == "on"
 
-    def test_skip_overrides_rule(self):
-        rule = RecurringRule(
-            id="daily", name="Daily", type="weekly",
-            days=["wednesday"], entry=ScheduleEntry(),
-        )
-        sc = ScheduleConfig(rules=[rule], skips=["2026-04-01"])
-        entry, source = sc.resolve(date(2026, 4, 1))
-        assert entry is None
-        assert source == "skip"
-
-    def test_skip_overrides_event(self):
-        sc = ScheduleConfig(
-            events={"2026-04-01": ScheduleEntry()},
-            skips=["2026-04-01"],
-        )
-        entry, source = sc.resolve(date(2026, 4, 1))
-        assert entry is None
-        assert source == "skip"
-
-    def test_multiple_rules_first_wins(self):
-        rule_a = RecurringRule(
-            id="first", name="First", type="weekly",
-            days=["wednesday"], entry=ScheduleEntry(wake_hour=5),
-        )
-        rule_b = RecurringRule(
-            id="second", name="Second", type="weekly",
-            days=["wednesday"], entry=ScheduleEntry(wake_hour=9),
-        )
-        sc = ScheduleConfig(rules=[rule_a, rule_b])
-        entry, source = sc.resolve(date(2026, 4, 1))
-        assert entry.wake_hour == 5
-        assert source == "rule:first"
-
-
-# -- ScheduleConfig.next_event --
-
-
-class TestNextEvent:
-    def _make_config(self, **kwargs) -> ScheduleConfig:
-        """Helper: weekly rule on Mon+Tue with wake=4:50, off=23:00."""
-        rule = RecurringRule(
-            id="work", name="Work", type="weekly",
-            days=["monday", "tuesday"],
-            entry=ScheduleEntry(),
-        )
-        return ScheduleConfig(enabled=True, rules=[rule], **kwargs)
-
-    def test_disabled_returns_none(self):
-        sc = ScheduleConfig(enabled=False)
-        assert sc.next_event() is None
-
-    def test_before_wake_time(self):
-        sc = self._make_config()
-        # 2026-03-30 is Monday, before 04:50
+    def test_next_event_before_wake(self):
+        s = Schedule(recurrence="weekly", days=["monday"], wake_hour=4, wake_minute=50)
+        sc = ScheduleConfig(schedules=[s])
+        # 2026-03-30 is Monday, 3:00 AM is before 4:50
         ev = sc.next_event(datetime(2026, 3, 30, 3, 0))
+        assert ev is not None
         assert ev["type"] == "on"
         assert ev["hour"] == 4
         assert ev["minute"] == 50
 
-    def test_between_wake_and_off(self):
-        sc = self._make_config()
+    def test_next_event_between(self):
+        s = Schedule(recurrence="weekly", days=["monday"])
+        sc = ScheduleConfig(schedules=[s])
         ev = sc.next_event(datetime(2026, 3, 30, 12, 0))
+        assert ev is not None
         assert ev["type"] == "off"
         assert ev["hour"] == 23
         assert ev["minute"] == 0
 
-    def test_after_off_finds_future(self):
-        sc = self._make_config()
+    def test_next_event_future(self):
+        s = Schedule(recurrence="weekly", days=["monday", "tuesday"])
+        sc = ScheduleConfig(schedules=[s])
         # After 23:00 on Monday → should find Tuesday
         ev = sc.next_event(datetime(2026, 3, 30, 23, 30))
-        assert ev["type"] == "on"
-        assert ev["day"] == "tuesday"
-
-    def test_no_events_returns_none(self):
-        sc = ScheduleConfig(enabled=True)
-        assert sc.next_event(datetime(2026, 3, 30, 12, 0)) is None
-
-    def test_skipped_day_skipped(self):
-        sc = self._make_config(skips=["2026-03-30"])
-        # Monday is skipped → should find Tuesday
-        ev = sc.next_event(datetime(2026, 3, 30, 3, 0))
-        assert ev["type"] == "on"
-        assert ev["day"] == "tuesday"
-
-    def test_one_time_event_found(self):
-        sc = ScheduleConfig(
-            enabled=True,
-            events={"2026-04-01": ScheduleEntry(wake_hour=7, wake_minute=0)},
-        )
-        ev = sc.next_event(datetime(2026, 3, 30, 12, 0))
         assert ev is not None
-        assert ev["date"] == "2026-04-01"
-        assert ev["hour"] == 7
+        assert ev["type"] == "on"
+        assert ev["day"] == "tuesday"
+
+    def test_next_event_empty(self):
+        sc = ScheduleConfig()
+        assert sc.next_event(datetime(2026, 3, 30, 12, 0)) is None
 
 
 # -- Config migration --
 
 
 class TestConfigMigration:
-    def test_new_format_parsed(self):
+    def test_v3_format(self):
+        from espresso_bridge.core.config import _parse_schedule
+
+        raw = {
+            "schedules": [
+                {
+                    "id": "work",
+                    "name": "Work",
+                    "recurrence": "weekly",
+                    "days": ["monday", "friday"],
+                    "wake_hour": 5,
+                    "wake_minute": 0,
+                    "off_hour": 22,
+                    "off_minute": 0,
+                    "steam": True,
+                },
+            ],
+        }
+        sc = _parse_schedule(raw)
+        assert len(sc.schedules) == 1
+        assert sc.schedules[0].id == "work"
+        assert sc.schedules[0].recurrence == "weekly"
+        assert sc.schedules[0].wake_hour == 5
+
+    def test_v2_migration(self):
         from espresso_bridge.core.config import _parse_schedule
 
         raw = {
             "enabled": True,
-            "rules": [{
-                "id": "work", "name": "Work", "type": "weekly",
-                "days": ["monday", "friday"],
-                "entry": {"wake_hour": 5, "wake_minute": 0, "off_hour": 22, "off_minute": 0, "steam": True},
-            }],
-            "events": {"2026-04-01": {"wake_hour": 9}},
-            "skips": ["2026-04-02"],
+            "rules": [
+                {
+                    "id": "work",
+                    "name": "Work",
+                    "type": "weekly",
+                    "days": ["monday", "friday"],
+                    "entry": {"wake_hour": 5, "wake_minute": 0, "off_hour": 22},
+                },
+            ],
+            "events": {
+                "2026-04-01": {"wake_hour": 9, "wake_minute": 0},
+            },
+            "skips": [],
         }
         sc = _parse_schedule(raw)
-        assert sc.enabled is True
-        assert len(sc.rules) == 1
-        assert sc.rules[0].id == "work"
-        assert "2026-04-01" in sc.events
-        assert "2026-04-02" in sc.skips
+        assert len(sc.schedules) >= 1
+        rule_sched = sc.schedules[0]
+        assert rule_sched.id == "work"
+        assert rule_sched.recurrence == "weekly"
+        assert "monday" in rule_sched.days
+        # Event migrated as a once schedule
+        event_scheds = [s for s in sc.schedules if s.recurrence == "once"]
+        assert len(event_scheds) == 1
+        assert event_scheds[0].date == "2026-04-01"
 
-    def test_old_format_migrated(self):
+    def test_v1_migration(self):
         from espresso_bridge.core.config import _parse_schedule
 
         raw = {
             "enabled": True,
             "reference_date": "2026-03-30",
             "week_a": {
-                "saturday": {"enabled": True, "on_hour": 8, "on_minute": 0, "off_hour": 20, "off_minute": 0, "steam": True},
+                "saturday": {
+                    "enabled": True,
+                    "on_hour": 8,
+                    "on_minute": 0,
+                    "off_hour": 20,
+                    "steam": True,
+                },
             },
             "week_b": {
-                "monday": {"enabled": True, "on_hour": 7, "on_minute": 0, "off_hour": 22, "off_minute": 0, "steam": True},
+                "monday": {
+                    "enabled": True,
+                    "on_hour": 7,
+                    "on_minute": 0,
+                    "off_hour": 22,
+                    "steam": True,
+                },
             },
         }
         sc = _parse_schedule(raw)
-        assert sc.enabled is True
-        assert len(sc.rules) == 1
-        rule = sc.rules[0]
-        assert rule.id == "migrated"
-        assert rule.type == "biweekly"
-        assert "saturday" in rule.days
-        assert "monday" in rule.days_b
+        assert len(sc.schedules) == 1
+        sched = sc.schedules[0]
+        assert sched.id == "migrated"
+        assert sched.recurrence == "biweekly"
+        assert "saturday" in sched.days
+        assert "monday" in sched.days_b
 
-    def test_empty_schedule(self):
+    def test_empty(self):
         from espresso_bridge.core.config import _parse_schedule
 
         sc = _parse_schedule({})
-        assert sc.enabled is False
-        assert sc.rules == []
-        assert sc.events == {}
-        assert sc.skips == []
+        assert sc.schedules == []
 
 
 # -- Config YAML round-trip --
@@ -277,28 +264,27 @@ class TestSchedulePersistence:
         cfg_path.write_text("server:\n  port: 8080\n")
 
         cfg = AppConfig.load(cfg_path)
-        rule = RecurringRule(
-            id="weekend", name="Weekend", type="weekly",
-            days=["saturday", "sunday"],
-            entry=ScheduleEntry(wake_hour=8, off_hour=20, steam=False),
-        )
-        event_entry = ScheduleEntry(wake_hour=9)
-        sched = ScheduleConfig(
-            enabled=True,
-            rules=[rule],
-            events={"2026-04-01": event_entry},
-            skips=["2026-04-02"],
-        )
+        sched = ScheduleConfig(schedules=[
+            Schedule(
+                id="weekend",
+                name="Weekend",
+                recurrence="weekly",
+                days=["saturday", "sunday"],
+                wake_hour=8,
+                off_hour=20,
+                steam=False,
+            ),
+        ])
         cfg.save_schedule(sched)
 
         cfg2 = AppConfig.load(cfg_path)
-        assert cfg2.schedule.enabled is True
-        assert len(cfg2.schedule.rules) == 1
-        assert cfg2.schedule.rules[0].id == "weekend"
-        assert cfg2.schedule.rules[0].entry.wake_hour == 8
-        assert cfg2.schedule.rules[0].entry.steam is False
-        assert "2026-04-01" in cfg2.schedule.events
-        assert "2026-04-02" in cfg2.schedule.skips
+        assert len(cfg2.schedule.schedules) == 1
+        s = cfg2.schedule.schedules[0]
+        assert s.id == "weekend"
+        assert s.wake_hour == 8
+        assert s.off_hour == 20
+        assert s.steam is False
+        assert "saturday" in s.days
 
     def test_preserves_other_config(self, tmp_path):
         from espresso_bridge.core.config import AppConfig
@@ -307,11 +293,13 @@ class TestSchedulePersistence:
         cfg_path.write_text("server:\n  port: 9090\n")
 
         cfg = AppConfig.load(cfg_path)
-        cfg.save_schedule(ScheduleConfig(enabled=True))
+        cfg.save_schedule(ScheduleConfig(schedules=[
+            Schedule(id="test", recurrence="daily"),
+        ]))
 
         cfg2 = AppConfig.load(cfg_path)
         assert cfg2.server.port == 9090
-        assert cfg2.schedule.enabled is True
+        assert len(cfg2.schedule.schedules) == 1
 
 
 # -- API endpoint tests --
@@ -330,14 +318,14 @@ class TestScheduleAPI:
 
         store = StateStore()
         config = AppConfig()
-        config.schedule = ScheduleConfig(
-            enabled=True,
-            rules=[RecurringRule(
-                id="work", name="Work", type="weekly",
+        config.schedule = ScheduleConfig(schedules=[
+            Schedule(
+                id="work",
+                name="Work",
+                recurrence="weekly",
                 days=["monday", "tuesday", "wednesday", "thursday", "friday"],
-                entry=ScheduleEntry(),
-            )],
-        )
+            ),
+        ])
 
         manager = MagicMock()
         manager.ss_phase = MagicMock(value="disconnected")
@@ -351,70 +339,71 @@ class TestScheduleAPI:
         app = create_app(manager, store, config=config)
         return TestClient(app), manager, config
 
-    def test_get_schedule(self, client):
+    def test_get_schedules(self, client):
         tc, _, _ = client
-        r = tc.get("/api/lm/schedule")
+        r = tc.get("/api/schedules")
         assert r.status_code == 200
         data = r.json()
-        assert data["schedule"]["enabled"] is True
-        assert len(data["resolved"]) == 42
+        assert "schedules" in data
+        assert len(data["schedules"]) == 1
+        assert data["schedules"][0]["id"] == "work"
+        assert "summary" in data["schedules"][0]
         assert "next_event" in data
 
-    def test_post_schedule(self, client):
+    def test_create_schedule(self, client):
         tc, manager, _ = client
         payload = {
-            "enabled": True,
-            "rules": [{
-                "id": "new", "name": "New Rule", "type": "weekly",
-                "days": ["saturday"],
-                "entry": {"wake_hour": 8, "off_hour": 20},
-            }],
-            "events": {},
-            "skips": [],
+            "name": "Weekend",
+            "recurrence": "weekly",
+            "days": ["saturday", "sunday"],
+            "wake_hour": 8,
+            "off_hour": 20,
         }
-        r = tc.post("/api/lm/schedule", json=payload)
+        r = tc.post("/api/schedules", json=payload)
         assert r.status_code == 200
         data = r.json()
         assert data["ok"] is True
-        assert data["schedule"]["enabled"] is True
-        assert data["schedule"]["rules"][0]["id"] == "new"
+        # Auto-generated id
+        new_scheds = [s for s in data["schedules"] if s["name"] == "Weekend"]
+        assert len(new_scheds) == 1
+        assert new_scheds[0]["id"] != ""
         manager.update_schedule.assert_called_once()
 
-    def test_toggle_day_add(self, client):
+    def test_delete_schedule(self, client):
         tc, manager, _ = client
-        r = tc.post(
-            "/api/lm/schedule/day/2026-04-15",
-            json={"action": "add", "entry": {"wake_hour": 7, "off_hour": 18}},
-        )
+        r = tc.delete("/api/schedules/work")
         assert r.status_code == 200
         data = r.json()
         assert data["ok"] is True
-        assert "2026-04-15" in data["schedule"]["events"]
-        assert data["schedule"]["events"]["2026-04-15"]["wake_hour"] == 7
-        manager.update_schedule.assert_called()
+        assert len(data["schedules"]) == 0
+        manager.update_schedule.assert_called_once()
 
-    def test_toggle_day_skip(self, client):
+    def test_toggle_schedule(self, client):
         tc, manager, _ = client
-        # 2026-04-06 is a Monday → matches the weekly rule
-        r = tc.post(
-            "/api/lm/schedule/day/2026-04-06",
-            json={"action": "skip"},
-        )
+        r = tc.post("/api/schedules/work/toggle")
         assert r.status_code == 200
         data = r.json()
-        assert "2026-04-06" in data["schedule"]["skips"]
+        assert data["ok"] is True
+        toggled = [s for s in data["schedules"] if s["id"] == "work"]
+        assert len(toggled) == 1
+        assert toggled[0]["enabled"] is False
+        manager.update_schedule.assert_called_once()
 
-    def test_toggle_day_remove(self, client):
-        tc, manager, config = client
-        # First add an event, then remove it
-        tc.post(
-            "/api/lm/schedule/day/2026-04-15",
-            json={"action": "add", "entry": {"wake_hour": 7}},
-        )
-        r = tc.post(
-            "/api/lm/schedule/day/2026-04-15",
-            json={"action": "remove"},
-        )
+    def test_update_schedule(self, client):
+        tc, manager, _ = client
+        payload = {
+            "name": "Updated Work",
+            "recurrence": "weekly",
+            "days": ["monday", "wednesday", "friday"],
+            "wake_hour": 6,
+            "off_hour": 22,
+        }
+        r = tc.put("/api/schedules/work", json=payload)
         assert r.status_code == 200
         data = r.json()
-        assert "2026-04-15" not in data["schedule"]["events"]
+        assert data["ok"] is True
+        updated = [s for s in data["schedules"] if s["id"] == "work"]
+        assert len(updated) == 1
+        assert updated[0]["name"] == "Updated Work"
+        assert updated[0]["wake_hour"] == 6
+        manager.update_schedule.assert_called_once()

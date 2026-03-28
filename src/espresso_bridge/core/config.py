@@ -12,9 +12,8 @@ from pathlib import Path
 import yaml
 
 from espresso_bridge.core.models import (
-    RecurringRule,
+    Schedule,
     ScheduleConfig,
-    ScheduleEntry,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,49 +114,92 @@ class AppConfig:
 
 
 def _parse_schedule(raw: dict) -> ScheduleConfig:
-    """Parse schedule section from YAML dict. Auto-migrates old week_a/week_b format."""
+    """Parse schedule section from YAML. Auto-migrates old formats."""
     if not raw:
         return ScheduleConfig()
     try:
-        # Detect old format by presence of week_a/week_b keys
+        # v1: week_a/week_b format
         if "week_a" in raw or "week_b" in raw:
-            return _migrate_old_schedule(raw)
+            return _migrate_v1(raw)
+        # v2: rules/events/skips format
+        if "rules" in raw or "events" in raw:
+            return _migrate_v2(raw)
+        # v3: current schedules list format
         return ScheduleConfig(**raw)
     except Exception:
         logger.warning("Invalid schedule config, using defaults")
         return ScheduleConfig()
 
 
-def _migrate_old_schedule(raw: dict) -> ScheduleConfig:
-    """Convert old week_a/week_b format to new rules+events format."""
+def _migrate_v1(raw: dict) -> ScheduleConfig:
+    """Convert v1 week_a/week_b → Schedule list."""
     days_a: list[str] = []
     days_b: list[str] = []
-    entry = ScheduleEntry()
+    wake_h, wake_m, off_h, steam = 4, 50, 23, True
 
     for week_key, day_list in [("week_a", days_a), ("week_b", days_b)]:
         week = raw.get(week_key, {})
         for day_name, day_cfg in week.items():
             if isinstance(day_cfg, dict) and day_cfg.get("enabled"):
                 day_list.append(day_name)
-                # Use first enabled day's time as the rule entry
-                if not days_a or (week_key == "week_a" and len(days_a) == 1):
-                    entry = ScheduleEntry(
-                        wake_hour=day_cfg.get("on_hour", 4),
-                        wake_minute=day_cfg.get("on_minute", 50),
-                        off_hour=day_cfg.get("off_hour", 23),
-                        off_minute=day_cfg.get("off_minute", 0),
-                        steam=day_cfg.get("steam", True),
-                    )
+                if len(days_a) == 1 and week_key == "week_a":
+                    wake_h = day_cfg.get("on_hour", 4)
+                    wake_m = day_cfg.get("on_minute", 50)
+                    off_h = day_cfg.get("off_hour", 23)
+                    steam = day_cfg.get("steam", True)
 
-    rule = RecurringRule(
+    if not days_a and not days_b:
+        return ScheduleConfig()
+
+    sched = Schedule(
         id="migrated",
         name="Migrated Schedule",
-        type="biweekly",
+        enabled=raw.get("enabled", False),
+        wake_hour=wake_h,
+        wake_minute=wake_m,
+        off_hour=off_h,
+        steam=steam,
+        recurrence="biweekly",
         reference_date=raw.get("reference_date", ""),
         days=days_a,
         days_b=days_b,
-        entry=entry,
     )
+    return ScheduleConfig(schedules=[sched])
 
-    rules = [rule] if days_a or days_b else []
-    return ScheduleConfig(enabled=raw.get("enabled", False), rules=rules)
+
+def _migrate_v2(raw: dict) -> ScheduleConfig:
+    """Convert v2 rules/events/skips → Schedule list."""
+    schedules: list[Schedule] = []
+
+    for rule in raw.get("rules", []):
+        entry = rule.get("entry", {})
+        schedules.append(Schedule(
+            id=rule.get("id", ""),
+            name=rule.get("name", ""),
+            enabled=raw.get("enabled", True),
+            wake_hour=entry.get("wake_hour", 4),
+            wake_minute=entry.get("wake_minute", 50),
+            off_hour=entry.get("off_hour", 23),
+            off_minute=entry.get("off_minute", 0),
+            steam=entry.get("steam", True),
+            recurrence=rule.get("type", "weekly"),
+            reference_date=rule.get("reference_date", ""),
+            days=rule.get("days", []),
+            days_b=rule.get("days_b", []),
+        ))
+
+    for iso_date, evt in raw.get("events", {}).items():
+        if isinstance(evt, dict):
+            schedules.append(Schedule(
+                id=f"evt-{iso_date}",
+                name=f"Event {iso_date}",
+                enabled=True,
+                wake_hour=evt.get("wake_hour", 4),
+                wake_minute=evt.get("wake_minute", 50),
+                off_hour=evt.get("off_hour", 23),
+                steam=evt.get("steam", True),
+                recurrence="once",
+                date=iso_date,
+            ))
+
+    return ScheduleConfig(schedules=schedules)

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <title>espresso-bridge</title>
-  <link rel="stylesheet" href="/css/app.css?v=6">
+  <link rel="stylesheet" href="/css/app.css?v=7">
 </head>
 <body>
   <!-- Status Bar -->
@@ -64,15 +64,71 @@
 
     <!-- Schedule View -->
     <main id="schedule-view" class="view">
-      <!-- Status Banner -->
+      <!-- Next Event Banner -->
       <div class="card schedule-banner" id="schedule-banner">
-        <div class="banner-text" id="banner-text">Schedule not enabled</div>
-        <button class="toggle-btn banner-toggle" id="schedule-enable">ENABLE</button>
+        <div class="banner-text" id="banner-text">No schedules</div>
       </div>
 
-      <!-- Calendar Strip (vertical scroll, 42 days) -->
-      <div class="calendar-strip" id="calendar-strip">
+      <!-- Schedule List -->
+      <div class="schedule-list" id="schedule-list">
         <!-- Populated by JS -->
+      </div>
+
+      <!-- Add Button -->
+      <button class="add-schedule-btn" id="add-schedule-btn">+ New Schedule</button>
+
+      <!-- Create/Edit Wizard (hidden by default) -->
+      <div class="wizard" id="wizard" style="display:none;">
+        <!-- Step 1: Time -->
+        <div class="wizard-step" id="wiz-step-1">
+          <div class="wiz-title">⏰ Wake Time</div>
+          <div class="wheel-row">
+            <div class="wheel-picker" id="wiz-hour">
+              <div class="wheel-highlight"></div>
+              <div class="wheel-scroller"></div>
+            </div>
+            <span class="wheel-sep">:</span>
+            <div class="wheel-picker" id="wiz-minute">
+              <div class="wheel-highlight"></div>
+              <div class="wheel-scroller"></div>
+            </div>
+            <div class="wheel-picker wheel-picker-sm" id="wiz-ampm">
+              <div class="wheel-highlight"></div>
+              <div class="wheel-scroller"></div>
+            </div>
+          </div>
+          <div class="wiz-row">
+            <label>Steam</label>
+            <button class="day-toggle on" id="wiz-steam"></button>
+          </div>
+          <div class="wiz-actions">
+            <button class="wiz-btn cancel" id="wiz-cancel">Cancel</button>
+            <button class="wiz-btn next" id="wiz-next-1">Next →</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Recurrence -->
+        <div class="wizard-step" id="wiz-step-2" style="display:none;">
+          <div class="wiz-title">📅 Recurrence</div>
+          <div class="wheel-picker wheel-picker-lg" id="wiz-recurrence">
+            <div class="wheel-highlight"></div>
+            <div class="wheel-scroller"></div>
+          </div>
+          <div class="wiz-actions">
+            <button class="wiz-btn back" id="wiz-back-2">← Back</button>
+            <button class="wiz-btn next" id="wiz-next-2">Next →</button>
+          </div>
+        </div>
+
+        <!-- Step 3: Days -->
+        <div class="wizard-step" id="wiz-step-3" style="display:none;">
+          <div class="wiz-title" id="wiz-days-title">📋 Select Days</div>
+          <div id="wiz-days-content"></div>
+          <div class="wiz-actions">
+            <button class="wiz-btn back" id="wiz-back-3">← Back</button>
+            <button class="wiz-btn save" id="wiz-save">Save ✓</button>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -90,6 +146,6 @@
     </button>
   </nav>
 
-  <script src="/js/app.js?v=4"></script>
+  <script src="/js/app.js?v=5"></script>
 </body>
 </html>

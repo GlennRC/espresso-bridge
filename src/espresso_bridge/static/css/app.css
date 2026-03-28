@@ -290,7 +290,7 @@ html, body {
 .schedule-banner {
   flex-direction: row;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   padding: 16px 20px;
   gap: 12px;
   flex-shrink: 0;
@@ -298,177 +298,289 @@ html, body {
 .banner-text {
   font-size: 16px;
   font-weight: 500;
-  flex: 1;
-}
-.banner-toggle {
-  min-width: 90px;
-  padding: 8px 16px;
-  font-size: 14px;
+  text-align: center;
 }
 
-/* Calendar Strip */
-.calendar-strip {
+/* Schedule List */
+.schedule-list {
   flex: 1;
   overflow-y: auto;
-  padding: 0 12px;
+  padding: 0 4px;
   -webkit-overflow-scrolling: touch;
 }
-.cal-day {
+.sched-card {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
-  margin-bottom: 2px;
+  padding: 14px 16px;
+  margin-bottom: 6px;
   border-radius: 10px;
   background: var(--card-bg);
   gap: 12px;
-  cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background 0.15s;
 }
-.cal-day:active {
-  opacity: 0.8;
-}
-.cal-day.today {
-  border: 2px solid var(--accent);
-}
-.cal-day.on {
-  background: #1b3a1b;
-}
-.cal-day.on.today {
-  border-color: var(--green);
-}
-.cal-day.skip {
-  background: #2a2020;
-  opacity: 0.6;
-}
-.cal-day.expanded {
-  border-radius: 10px 10px 0 0;
-  margin-bottom: 0;
-}
-.cal-date {
-  width: 44px;
+.sched-icon {
+  font-size: 24px;
+  width: 36px;
   text-align: center;
+  flex-shrink: 0;
 }
-.cal-date-num {
-  font-size: 22px;
-  font-weight: 600;
-  line-height: 1.1;
-}
-.cal-date-day {
-  font-size: 10px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.cal-day.today .cal-date-day {
-  color: var(--accent);
-  font-weight: 700;
-}
-.cal-info {
+.sched-details {
   flex: 1;
+  min-width: 0;
+}
+.sched-name {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sched-summary {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.sched-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  flex-shrink: 0;
 }
-.cal-status {
-  font-size: 14px;
-  color: var(--text-dim);
-}
-.cal-day.on .cal-status {
-  color: var(--green);
-  font-weight: 600;
-}
-.cal-day.skip .cal-status {
+.sched-delete {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid #444;
+  background: transparent;
   color: var(--red);
-  text-decoration: line-through;
-  opacity: 0.8;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.cal-time {
-  font-size: 13px;
-  color: var(--text-dim);
-}
-.cal-day.on .cal-time {
-  color: var(--text);
-}
-.cal-steam {
-  font-size: 14px;
-  opacity: 0.3;
-}
-.cal-day.on .cal-steam {
-  opacity: 1;
-  color: var(--orange);
-}
-.cal-source {
-  font-size: 12px;
-  opacity: 0.6;
-}
-.cal-month-sep {
-  padding: 10px 12px 4px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+.sched-delete:active {
+  background: var(--red);
+  color: #fff;
 }
 
-/* Accordion Editor */
-.cal-editor {
-  background: #2a2a2a;
-  border-radius: 0 0 10px 10px;
-  padding: 12px 16px;
-  margin-bottom: 2px;
+/* Add Button */
+.add-schedule-btn {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 4px 12px 12px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 2px dashed #444;
+  background: transparent;
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.add-schedule-btn:active {
+  background: #333;
+}
+
+/* Wizard */
+.wizard {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg);
+  z-index: 100;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  padding: 16px;
 }
-.editor-controls {
+.wizard-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  flex: 1;
+}
+.wiz-title {
+  font-size: 20px;
+  font-weight: 600;
+  padding-top: 12px;
+}
+.wiz-row {
   display: flex;
   align-items: center;
-  gap: 16px;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 20px;
 }
-.editor-field {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.editor-field label {
-  font-size: 13px;
+.wiz-row label {
+  font-size: 16px;
   color: var(--text-dim);
 }
-.editor-actions {
+.wiz-actions {
   display: flex;
-  gap: 8px;
+  gap: 12px;
+  width: 100%;
+  margin-top: auto;
+  padding-bottom: 8px;
 }
-.editor-btn {
+.wiz-btn {
   flex: 1;
-  padding: 10px 12px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 2px solid #444;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+}
+.wiz-btn.next, .wiz-btn.save {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.wiz-btn.cancel {
+  border-color: var(--red);
+  color: var(--red);
+}
+.wiz-btn:active {
+  opacity: 0.7;
+}
+
+/* Scroll Wheel Picker */
+.wheel-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: center;
+}
+.wheel-sep {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text-dim);
+  padding: 0 2px;
+}
+.wheel-picker {
+  position: relative;
+  width: 80px;
+  height: 180px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--card-bg);
+}
+.wheel-picker-sm {
+  width: 60px;
+}
+.wheel-picker-lg {
+  width: 220px;
+  height: 200px;
+}
+.wheel-highlight {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  right: 4px;
+  height: 44px;
+  transform: translateY(-50%);
+  background: rgba(212, 160, 83, 0.15);
   border-radius: 8px;
-  border: 1px solid #444;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+  z-index: 2;
+}
+.wheel-scroller {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  transition: transform 0.15s ease-out;
+  z-index: 1;
+}
+.wheel-item {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--text-dim);
+  transition: color 0.1s, opacity 0.1s;
+}
+.wheel-picker-lg .wheel-item {
+  font-size: 18px;
+}
+.wheel-item.selected {
+  color: var(--text);
+  font-weight: 700;
+}
+.wheel-item.far {
+  opacity: 0.3;
+}
+
+/* Day Picker (Step 3) */
+.day-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  padding: 8px;
+  width: 100%;
+}
+.day-picker-label {
+  width: 100%;
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 8px 0 4px;
+  text-align: center;
+}
+.day-btn {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 2px solid #444;
   background: transparent;
   color: var(--text);
   font-size: 14px;
   font-weight: 600;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.editor-btn:active {
+.day-btn.active {
+  border-color: var(--green);
+  background: rgba(76, 175, 80, 0.2);
+  color: var(--green);
+}
+.day-btn:active {
   opacity: 0.7;
 }
-.editor-btn.add {
+
+/* Monthly Grid (1-31) */
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  padding: 8px;
+  width: 100%;
+}
+.month-day-btn {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  border: 2px solid #444;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.month-day-btn.active {
   border-color: var(--green);
+  background: rgba(76, 175, 80, 0.2);
   color: var(--green);
 }
-.editor-btn.save {
-  border-color: var(--blue);
-  color: var(--blue);
-}
-.editor-btn.skip, .editor-btn.remove {
-  border-color: var(--red);
-  color: var(--red);
-}
-.editor-btn.unskip {
-  border-color: var(--green);
-  color: var(--green);
+.month-day-btn:active {
+  opacity: 0.7;
 }
 
 /* Shared controls */

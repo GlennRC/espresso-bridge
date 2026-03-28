@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from espresso_bridge.ble.manager import DeviceManager
 from espresso_bridge.core.config import AppConfig
-from espresso_bridge.core.models import ScheduleConfig, ScheduleEntry
+from espresso_bridge.core.models import Schedule, ScheduleConfig
 from espresso_bridge.core.state import StateStore
 
 logger = logging.getLogger(__name__)
@@ -140,93 +140,71 @@ def create_app(
 
     # -- Schedule endpoints --
 
-    @app.get("/api/lm/schedule")
-    async def get_schedule():
-        """Get the full schedule config with resolved days."""
+    def _schedule_response():
+        """Build standard schedule response."""
         sched = config.schedule if config else ScheduleConfig()
-        from datetime import datetime, timedelta
-
-        now = datetime.now()
-        today = now.date()
-
-        # Resolve next 42 days for the calendar strip
-        resolved = []
-        for i in range(42):
-            d = today + timedelta(days=i)
-            entry, source = sched.resolve(d)
-            day_info = {
-                "date": d.isoformat(),
-                "weekday": d.strftime("%A").lower(),
-                "source": source,
-            }
-            if entry:
-                day_info["entry"] = entry.model_dump()
-            resolved.append(day_info)
-
         return {
-            "schedule": sched.model_dump(),
-            "resolved": resolved,
-            "next_event": sched.next_event(now),
-        }
-
-    @app.post("/api/lm/schedule")
-    async def set_schedule(new_sched: ScheduleConfig):
-        """Update the schedule config. Persists to config.yaml."""
-        if config:
-            config.save_schedule(new_sched)
-            manager.update_schedule(new_sched)
-        from datetime import datetime
-
-        return {
-            "ok": True,
-            "schedule": new_sched.model_dump(),
-            "next_event": new_sched.next_event(),
-        }
-
-    @app.post("/api/lm/schedule/day/{iso_date}")
-    async def toggle_schedule_day(iso_date: str, body: dict | None = None):
-        """Toggle a specific day. Body can include {action: 'add'|'skip'|'remove', entry: {...}}."""
-        from datetime import date as date_type, datetime
-
-        sched = config.schedule if config else ScheduleConfig()
-        action = (body or {}).get("action", "toggle")
-        entry_data = (body or {}).get("entry")
-
-        if action == "skip":
-            if iso_date not in sched.skips:
-                sched.skips.append(iso_date)
-            sched.events.pop(iso_date, None)
-        elif action == "remove":
-            sched.skips = [s for s in sched.skips if s != iso_date]
-            sched.events.pop(iso_date, None)
-        elif action == "add":
-            sched.skips = [s for s in sched.skips if s != iso_date]
-            entry = ScheduleEntry(**(entry_data or {}))
-            sched.events[iso_date] = entry
-        else:  # toggle
-            current_entry, source = sched.resolve(date_type.fromisoformat(iso_date))
-            if current_entry:
-                # Currently ON → skip or remove
-                if source == "manual":
-                    sched.events.pop(iso_date, None)
-                else:
-                    if iso_date not in sched.skips:
-                        sched.skips.append(iso_date)
-            else:
-                # Currently OFF → add one-time event
-                sched.skips = [s for s in sched.skips if s != iso_date]
-                entry = ScheduleEntry(**(entry_data or {}))
-                sched.events[iso_date] = entry
-
-        if config:
-            config.save_schedule(sched)
-            manager.update_schedule(sched)
-
-        return {
-            "ok": True,
-            "schedule": sched.model_dump(),
+            "schedules": [
+                {**s.model_dump(), "summary": s.summary()} for s in sched.schedules
+            ],
             "next_event": sched.next_event(),
         }
+
+    @app.get("/api/schedules")
+    async def get_schedules():
+        """List all schedules with next event."""
+        return _schedule_response()
+
+    @app.post("/api/schedules")
+    async def create_schedule(new_sched: Schedule):
+        """Create a new schedule."""
+        import uuid
+
+        if not new_sched.id:
+            new_sched.id = str(uuid.uuid4())[:8]
+        sched_cfg = config.schedule if config else ScheduleConfig()
+        sched_cfg.schedules.append(new_sched)
+        if config:
+            config.save_schedule(sched_cfg)
+            manager.update_schedule(sched_cfg)
+        return {"ok": True, **_schedule_response()}
+
+    @app.put("/api/schedules/{sched_id}")
+    async def update_schedule_endpoint(sched_id: str, updated: Schedule):
+        """Update an existing schedule."""
+        sched_cfg = config.schedule if config else ScheduleConfig()
+        for i, s in enumerate(sched_cfg.schedules):
+            if s.id == sched_id:
+                updated.id = sched_id
+                sched_cfg.schedules[i] = updated
+                if config:
+                    config.save_schedule(sched_cfg)
+                    manager.update_schedule(sched_cfg)
+                return {"ok": True, **_schedule_response()}
+        return {"ok": False, "error": "not found"}
+
+    @app.delete("/api/schedules/{sched_id}")
+    async def delete_schedule(sched_id: str):
+        """Delete a schedule."""
+        sched_cfg = config.schedule if config else ScheduleConfig()
+        sched_cfg.schedules = [s for s in sched_cfg.schedules if s.id != sched_id]
+        if config:
+            config.save_schedule(sched_cfg)
+            manager.update_schedule(sched_cfg)
+        return {"ok": True, **_schedule_response()}
+
+    @app.post("/api/schedules/{sched_id}/toggle")
+    async def toggle_schedule(sched_id: str):
+        """Toggle a schedule's enabled state."""
+        sched_cfg = config.schedule if config else ScheduleConfig()
+        for s in sched_cfg.schedules:
+            if s.id == sched_id:
+                s.enabled = not s.enabled
+                if config:
+                    config.save_schedule(sched_cfg)
+                    manager.update_schedule(sched_cfg)
+                return {"ok": True, **_schedule_response()}
+        return {"ok": False, "error": "not found"}
 
     # -- WebSocket for live state --
 

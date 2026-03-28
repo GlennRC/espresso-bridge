@@ -262,23 +262,20 @@ class DeviceManager:
 
     async def _check_schedule(self) -> None:
         """Evaluate the schedule and fire power on/off if needed."""
-        sched = self._config.schedule
-        if not sched.enabled:
-            return
-
+        sched_cfg = self._config.schedule
         if not self._lamarzocco:
             return
 
         now = datetime.now()
         today = now.date()
-        entry, source = sched.resolve(today)
+        sched = sched_cfg.resolve(today)
 
-        if not entry:
+        if not sched:
             return
 
         current_minutes = now.hour * 60 + now.minute
-        on_minutes = entry.wake_hour * 60 + entry.wake_minute
-        off_minutes = entry.off_hour * 60 + entry.off_minute
+        on_minutes = sched.wake_hour * 60 + sched.wake_minute
+        off_minutes = sched.off_hour * 60 + sched.off_minute
 
         # Determine desired state
         if on_minutes < off_minutes:
@@ -295,12 +292,12 @@ class DeviceManager:
         at_off = abs(current_minutes - off_minutes) <= 1
 
         if at_on and should_be_on:
-            logger.info(f"Schedule: turning machine ON ({entry.wake_hour:02d}:{entry.wake_minute:02d})")
+            logger.info(f"Schedule: turning machine ON ({sched.wake_hour:02d}:{sched.wake_minute:02d})")
             ok = await self._lamarzocco.set_power(True)
-            if ok and entry.steam:
+            if ok and sched.steam:
                 await self._lamarzocco.set_steam_enabled(True)
             self._last_fired = fire_key
         elif at_off and not should_be_on:
-            logger.info(f"Schedule: turning machine OFF ({entry.off_hour:02d}:{entry.off_minute:02d})")
+            logger.info(f"Schedule: turning machine OFF ({sched.off_hour:02d}:{sched.off_minute:02d})")
             await self._lamarzocco.set_power(False)
             self._last_fired = fire_key

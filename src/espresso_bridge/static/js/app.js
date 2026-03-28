@@ -5,6 +5,7 @@
 
   const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
   const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const DAY_LETTER = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
   const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   // State
@@ -13,13 +14,8 @@
     lamarzocco: { connected: false, turned_on: false, coffee_temp_target: 93.0, steam_level: 2, steam_enabled: false }
   };
 
-  let scheduleState = {
-    schedule: { enabled: false, rules: [], events: {}, skips: [] },
-    resolved: [],
-    next_event: null
-  };
-
-  let expandedDate = null;
+  let scheduleData = { schedules: [], next_event: null };
+  let editingSchedule = null; // null = create new, or existing schedule id
 
   // Elements
   const el = {
@@ -34,8 +30,15 @@
     coffeeUp: document.getElementById('coffee-up'),
     coffeeDown: document.getElementById('coffee-down'),
     bannerText: document.getElementById('banner-text'),
-    scheduleEnable: document.getElementById('schedule-enable'),
-    calendarStrip: document.getElementById('calendar-strip'),
+    scheduleList: document.getElementById('schedule-list'),
+    addBtn: document.getElementById('add-schedule-btn'),
+    wizard: document.getElementById('wizard'),
+    wizStep1: document.getElementById('wiz-step-1'),
+    wizStep2: document.getElementById('wiz-step-2'),
+    wizStep3: document.getElementById('wiz-step-3'),
+    wizSteam: document.getElementById('wiz-steam'),
+    wizDaysContent: document.getElementById('wiz-days-content'),
+    wizDaysTitle: document.getElementById('wiz-days-title'),
   };
 
   // -- API helpers --
@@ -97,216 +100,452 @@
     return `${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
   }
 
+  const RECURRENCE_LABELS = {
+    once: '📌 Once',
+    daily: '📅 Daily',
+    weekly: '🔄 Weekly',
+    biweekly: '🔁 Biweekly',
+    monthly: '📆 Monthly'
+  };
+  const RECURRENCE_ICONS = { once: '📌', daily: '📅', weekly: '🔄', biweekly: '🔁', monthly: '📆' };
+
   // -- Schedule API --
 
   async function loadSchedule() {
-    const res = await api('GET', '/lm/schedule');
-    if (res.schedule) {
-      scheduleState.schedule = res.schedule;
-      scheduleState.resolved = res.resolved || [];
-      scheduleState.next_event = res.next_event;
-      renderSchedule();
+    const res = await api('GET', '/schedules');
+    if (res.schedules !== undefined) {
+      scheduleData = res;
+      renderScheduleList();
     }
   }
 
-  async function saveFullSchedule() {
-    await api('POST', '/lm/schedule', scheduleState.schedule);
-    await loadSchedule();
+  async function createSchedule(sched) {
+    const res = await api('POST', '/schedules', sched);
+    if (res.ok) { scheduleData = res; renderScheduleList(); }
   }
 
-  async function dayAction(isoDate, action, entryData) {
-    const body = { action };
-    if (entryData) body.entry = entryData;
-    await api('POST', `/lm/schedule/day/${isoDate}`, body);
-    expandedDate = null;
-    await loadSchedule();
+  async function updateSchedule(id, sched) {
+    const res = await api('PUT', `/schedules/${id}`, sched);
+    if (res.ok) { scheduleData = res; renderScheduleList(); }
   }
 
-  // -- Schedule render --
+  async function deleteSchedule(id) {
+    const res = await api('DELETE', `/schedules/${id}`);
+    if (res.ok) { scheduleData = res; renderScheduleList(); }
+  }
 
-  function renderSchedule() {
-    const { schedule, next_event } = scheduleState;
+  async function toggleSchedule(id) {
+    const res = await api('POST', `/schedules/${id}/toggle`);
+    if (res.ok) { scheduleData = res; renderScheduleList(); }
+  }
+
+  // -- Schedule List Render --
+
+  function renderScheduleList() {
+    const { schedules, next_event } = scheduleData;
 
     // Banner
-    el.scheduleEnable.textContent = schedule.enabled ? 'DISABLE' : 'ENABLE';
-    el.scheduleEnable.classList.toggle('on', schedule.enabled);
-
-    if (!schedule.enabled) {
-      el.bannerText.textContent = 'Schedule not enabled';
-    } else if (next_event) {
+    if (next_event) {
       const dayLabel = DAY_SHORT[DAYS.indexOf(next_event.day)] || next_event.day;
       const verb = next_event.type === 'on' ? 'Turns on' : 'Turns off';
       const dateStr = next_event.date ? formatDateShort(next_event.date) : '';
       el.bannerText.textContent = `${verb} ${dayLabel} ${dateStr} at ${formatTime12(next_event.hour, next_event.minute)}`;
     } else {
-      el.bannerText.textContent = 'No upcoming events';
+      el.bannerText.textContent = schedules.length ? 'No upcoming events' : 'No schedules yet';
     }
 
-    renderCalendarStrip();
+    // Schedule cards
+    const list = el.scheduleList;
+    list.innerHTML = '';
+
+    for (const s of schedules) {
+      const card = document.createElement('div');
+      card.className = 'sched-card';
+
+      const icon = document.createElement('div');
+      icon.className = 'sched-icon';
+      icon.textContent = RECURRENCE_ICONS[s.recurrence] || '📅';
+
+      const details = document.createElement('div');
+      details.className = 'sched-details';
+      details.innerHTML =
+        '<div class="sched-name">' + (s.name || 'Schedule') + '</div>' +
+        '<div class="sched-summary">' + (s.summary || '') + '</div>';
+
+      // Tap card to edit
+      details.addEventListener('click', () => openWizard(s));
+
+      const actions = document.createElement('div');
+      actions.className = 'sched-actions';
+
+      // Toggle
+      const toggle = document.createElement('button');
+      toggle.className = 'day-toggle' + (s.enabled ? ' on' : '');
+      toggle.addEventListener('click', (e) => { e.stopPropagation(); toggleSchedule(s.id); });
+
+      // Delete
+      const del = document.createElement('button');
+      del.className = 'sched-delete';
+      del.textContent = '✕';
+      del.addEventListener('click', (e) => { e.stopPropagation(); deleteSchedule(s.id); });
+
+      actions.appendChild(toggle);
+      actions.appendChild(del);
+
+      card.appendChild(icon);
+      card.appendChild(details);
+      card.appendChild(actions);
+      list.appendChild(card);
+    }
   }
 
-  function renderCalendarStrip() {
-    const strip = el.calendarStrip;
-    const scrollPos = strip.scrollTop;
-    strip.innerHTML = '';
+  // -- Scroll Wheel Picker --
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    let lastMonth = null;
+  function createWheel(container, items, selectedIndex, onChange) {
+    const scroller = container.querySelector('.wheel-scroller');
+    scroller.innerHTML = '';
+    const itemHeight = 44;
+    const visibleItems = Math.round(container.offsetHeight / itemHeight);
+    const padCount = Math.floor(visibleItems / 2);
 
-    for (const day of scheduleState.resolved) {
-      const d = new Date(day.date + 'T00:00:00');
-      const isTodayDate = d.getTime() === today.getTime();
-      const hasEntry = !!day.entry;
-      const isSkip = day.source === 'skip';
-      const isRecurring = day.source.startsWith('rule:');
-      const isManual = day.source === 'manual';
-      const isExpanded = expandedDate === day.date;
+    // Pad top/bottom for centering
+    for (let i = 0; i < padCount; i++) {
+      const pad = document.createElement('div');
+      pad.className = 'wheel-item';
+      pad.style.visibility = 'hidden';
+      scroller.appendChild(pad);
+    }
+    items.forEach((text, idx) => {
+      const item = document.createElement('div');
+      item.className = 'wheel-item';
+      item.textContent = text;
+      item.dataset.idx = idx;
+      scroller.appendChild(item);
+    });
+    for (let i = 0; i < padCount; i++) {
+      const pad = document.createElement('div');
+      pad.className = 'wheel-item';
+      pad.style.visibility = 'hidden';
+      scroller.appendChild(pad);
+    }
 
-      // Month separator
-      const month = d.getMonth();
-      if (month !== lastMonth) {
-        const sep = document.createElement('div');
-        sep.className = 'cal-month-sep';
-        sep.textContent = MONTH_SHORT[month] + ' ' + d.getFullYear();
-        strip.appendChild(sep);
-        lastMonth = month;
-      }
+    let currentIdx = selectedIndex;
+    let startY = 0, startOffset = 0, dragging = false;
 
-      // Day row
-      const row = document.createElement('div');
-      row.className = 'cal-day';
-      if (hasEntry) row.classList.add('on');
-      if (isSkip) row.classList.add('skip');
-      if (isTodayDate) row.classList.add('today');
-      if (isExpanded) row.classList.add('expanded');
+    function setIndex(idx) {
+      idx = Math.max(0, Math.min(items.length - 1, idx));
+      currentIdx = idx;
+      scroller.style.transform = `translateY(${-idx * itemHeight}px)`;
 
-      // Date column
-      const dateCol = document.createElement('div');
-      dateCol.className = 'cal-date';
-      const jsDay = d.getDay() === 0 ? 6 : d.getDay() - 1;
-      dateCol.innerHTML =
-        '<div class="cal-date-num">' + d.getDate() + '</div>' +
-        '<div class="cal-date-day">' + (isTodayDate ? 'Today' : DAY_SHORT[jsDay]) + '</div>';
-
-      // Info column
-      const info = document.createElement('div');
-      info.className = 'cal-info';
-
-      if (isSkip) {
-        info.innerHTML = '<span class="cal-status">SKIP</span>';
-      } else if (hasEntry) {
-        const e = day.entry;
-        const srcIcon = isRecurring ? '🔄' : '📌';
-        info.innerHTML =
-          '<span class="cal-status">● ON</span>' +
-          '<span class="cal-time">' + formatTime12(e.wake_hour, e.wake_minute) + '</span>' +
-          (e.steam ? '<span class="cal-steam">♨</span>' : '') +
-          '<span class="cal-source">' + srcIcon + '</span>';
-      } else {
-        info.innerHTML = '<span class="cal-status">OFF</span>';
-      }
-
-      row.appendChild(dateCol);
-      row.appendChild(info);
-
-      // Tap to expand/collapse
-      row.addEventListener('click', () => {
-        expandedDate = expandedDate === day.date ? null : day.date;
-        renderCalendarStrip();
+      // Highlight selected
+      scroller.querySelectorAll('.wheel-item').forEach(el => {
+        el.classList.remove('selected', 'far');
+        const elIdx = parseInt(el.dataset.idx);
+        if (isNaN(elIdx)) return;
+        if (elIdx === idx) el.classList.add('selected');
+        else if (Math.abs(elIdx - idx) > 1) el.classList.add('far');
       });
 
-      strip.appendChild(row);
-
-      // Editor accordion
-      if (isExpanded) {
-        strip.appendChild(createEditor(day));
-      }
+      onChange(idx);
     }
 
-    strip.scrollTop = scrollPos;
+    function handleStart(e) {
+      dragging = true;
+      startY = e.touches ? e.touches[0].clientY : e.clientY;
+      startOffset = currentIdx * itemHeight;
+      scroller.style.transition = 'none';
+    }
+
+    function handleMove(e) {
+      if (!dragging) return;
+      e.preventDefault();
+      const y = e.touches ? e.touches[0].clientY : e.clientY;
+      const dy = startY - y;
+      const newIdx = Math.round((startOffset + dy) / itemHeight);
+      setIndex(newIdx);
+    }
+
+    function handleEnd() {
+      dragging = false;
+      scroller.style.transition = 'transform 0.15s ease-out';
+      setIndex(currentIdx);
+    }
+
+    container.addEventListener('touchstart', handleStart, { passive: true });
+    container.addEventListener('touchmove', handleMove, { passive: false });
+    container.addEventListener('touchend', handleEnd);
+    container.addEventListener('mousedown', handleStart);
+    container.addEventListener('mousemove', handleMove);
+    container.addEventListener('mouseup', handleEnd);
+    container.addEventListener('mouseleave', handleEnd);
+
+    scroller.style.transition = 'transform 0.15s ease-out';
+    setIndex(selectedIndex);
+
+    return { getIndex: () => currentIdx, setIndex };
   }
 
-  function createEditor(day) {
-    const editor = document.createElement('div');
-    editor.className = 'cal-editor';
+  // -- Wizard State --
+  let wizWheels = {};
+  let wizState = {
+    wake_hour: 4, wake_minute: 50, steam: true,
+    recurrence: 'weekly',
+    days: [], days_b: [], date: '', month_days: [],
+    reference_date: '', name: '', id: '', enabled: true
+  };
 
-    const hasEntry = !!day.entry;
-    const isSkip = day.source === 'skip';
-    const isRecurring = day.source.startsWith('rule:');
-    const isManual = day.source === 'manual';
-
-    const wakeH = hasEntry ? day.entry.wake_hour : 4;
-    const wakeM = hasEntry ? day.entry.wake_minute : 50;
-    const steam = hasEntry ? day.entry.steam : true;
-    const timeVal = String(wakeH).padStart(2, '0') + ':' + String(wakeM).padStart(2, '0');
-
-    // Controls row
-    const controls = document.createElement('div');
-    controls.className = 'editor-controls';
-    controls.innerHTML =
-      '<div class="editor-field">' +
-        '<label>Wake</label>' +
-        '<input type="time" class="time-input editor-time" value="' + timeVal + '">' +
-      '</div>' +
-      '<div class="editor-field">' +
-        '<label>Steam</label>' +
-        '<button class="day-toggle editor-steam ' + (steam ? 'on' : '') + '"></button>' +
-      '</div>';
-
-    // Prevent clicks in editor from collapsing
-    controls.addEventListener('click', function(e) { e.stopPropagation(); });
-
-    // Steam toggle
-    const steamBtn = controls.querySelector('.editor-steam');
-    steamBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      steamBtn.classList.toggle('on');
-    });
-
-    // Actions row
-    const actions = document.createElement('div');
-    actions.className = 'editor-actions';
-
-    const timeInput = controls.querySelector('.editor-time');
-
-    function getEntryData() {
-      const parts = timeInput.value.split(':');
-      return {
-        wake_hour: parseInt(parts[0]) || 4,
-        wake_minute: parseInt(parts[1]) || 50,
-        off_hour: 23, off_minute: 0,
-        steam: steamBtn.classList.contains('on')
+  function openWizard(existing) {
+    if (existing) {
+      editingSchedule = existing.id;
+      wizState = { ...existing };
+    } else {
+      editingSchedule = null;
+      wizState = {
+        wake_hour: 4, wake_minute: 50, steam: true,
+        recurrence: 'weekly', days: [], days_b: [],
+        date: new Date().toISOString().split('T')[0],
+        month_days: [], reference_date: '', name: '', id: '', enabled: true
       };
     }
 
-    if (isSkip) {
-      addBtn(actions, 'Un-skip', 'unskip', function() { dayAction(day.date, 'remove'); });
-    } else if (!hasEntry) {
-      addBtn(actions, '+ Add', 'add', function() { dayAction(day.date, 'add', getEntryData()); });
-    } else if (isManual) {
-      addBtn(actions, 'Remove', 'remove', function() { dayAction(day.date, 'remove'); });
-      addBtn(actions, 'Save', 'save', function() { dayAction(day.date, 'add', getEntryData()); });
-    } else if (isRecurring) {
-      addBtn(actions, 'Skip', 'skip', function() { dayAction(day.date, 'skip'); });
-      addBtn(actions, 'Customize', 'save', function() { dayAction(day.date, 'add', getEntryData()); });
+    el.wizard.style.display = 'flex';
+    el.addBtn.style.display = 'none';
+    showWizStep(1);
+  }
+
+  function closeWizard() {
+    el.wizard.style.display = 'none';
+    el.addBtn.style.display = 'block';
+    editingSchedule = null;
+  }
+
+  function showWizStep(step) {
+    el.wizStep1.style.display = step === 1 ? 'flex' : 'none';
+    el.wizStep2.style.display = step === 2 ? 'flex' : 'none';
+    el.wizStep3.style.display = step === 3 ? 'flex' : 'none';
+
+    if (step === 1) initStep1();
+    if (step === 2) initStep2();
+    if (step === 3) initStep3();
+  }
+
+  function initStep1() {
+    // Convert 24h to 12h for wheel
+    let h12 = wizState.wake_hour % 12;
+    if (h12 === 0) h12 = 12;
+    const isPM = wizState.wake_hour >= 12;
+
+    const hours = Array.from({length: 12}, (_, i) => String(i + 1));
+    const minutes = Array.from({length: 60}, (_, i) => String(i).padStart(2, '0'));
+
+    wizWheels.hour = createWheel(
+      document.getElementById('wiz-hour'), hours, h12 - 1,
+      (idx) => { wizState._h12 = idx + 1; }
+    );
+    wizWheels.minute = createWheel(
+      document.getElementById('wiz-minute'), minutes, wizState.wake_minute,
+      (idx) => { wizState.wake_minute = idx; }
+    );
+    wizWheels.ampm = createWheel(
+      document.getElementById('wiz-ampm'), ['AM', 'PM'], isPM ? 1 : 0,
+      (idx) => { wizState._isPM = idx === 1; }
+    );
+    wizState._h12 = h12;
+    wizState._isPM = isPM;
+
+    el.wizSteam.className = 'day-toggle' + (wizState.steam ? ' on' : '');
+  }
+
+  function initStep2() {
+    const types = ['once', 'daily', 'weekly', 'biweekly', 'monthly'];
+    const labels = types.map(t => RECURRENCE_LABELS[t]);
+    const idx = types.indexOf(wizState.recurrence);
+
+    wizWheels.recurrence = createWheel(
+      document.getElementById('wiz-recurrence'), labels, Math.max(0, idx),
+      (idx) => { wizState.recurrence = types[idx]; }
+    );
+  }
+
+  function initStep3() {
+    const content = el.wizDaysContent;
+    content.innerHTML = '';
+
+    const rec = wizState.recurrence;
+
+    if (rec === 'once') {
+      el.wizDaysTitle.textContent = '📋 Pick Date';
+      const input = document.createElement('input');
+      input.type = 'date';
+      input.className = 'date-input';
+      input.value = wizState.date || new Date().toISOString().split('T')[0];
+      input.style.width = '100%';
+      input.style.fontSize = '20px';
+      input.style.padding = '12px';
+      input.addEventListener('change', () => { wizState.date = input.value; });
+      content.appendChild(input);
+
+    } else if (rec === 'daily') {
+      el.wizDaysTitle.textContent = '📋 Every Day';
+      const msg = document.createElement('div');
+      msg.style.cssText = 'text-align:center;color:var(--text-dim);font-size:16px;padding:40px 0;';
+      msg.textContent = 'Fires every day — no selection needed';
+      content.appendChild(msg);
+
+    } else if (rec === 'weekly') {
+      el.wizDaysTitle.textContent = '📋 Select Days';
+      const picker = document.createElement('div');
+      picker.className = 'day-picker';
+      DAYS.forEach((day, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'day-btn' + (wizState.days.includes(day) ? ' active' : '');
+        btn.textContent = DAY_LETTER[i];
+        btn.addEventListener('click', () => {
+          btn.classList.toggle('active');
+          if (wizState.days.includes(day)) {
+            wizState.days = wizState.days.filter(d => d !== day);
+          } else {
+            wizState.days.push(day);
+          }
+        });
+        picker.appendChild(btn);
+      });
+      content.appendChild(picker);
+
+    } else if (rec === 'biweekly') {
+      el.wizDaysTitle.textContent = '📋 Select Days (A & B)';
+
+      // Week A
+      const labelA = document.createElement('div');
+      labelA.className = 'day-picker-label';
+      labelA.textContent = 'Week A';
+      content.appendChild(labelA);
+      const pickerA = document.createElement('div');
+      pickerA.className = 'day-picker';
+      DAYS.forEach((day, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'day-btn' + (wizState.days.includes(day) ? ' active' : '');
+        btn.textContent = DAY_LETTER[i];
+        btn.addEventListener('click', () => {
+          btn.classList.toggle('active');
+          if (wizState.days.includes(day)) {
+            wizState.days = wizState.days.filter(d => d !== day);
+          } else {
+            wizState.days.push(day);
+          }
+        });
+        pickerA.appendChild(btn);
+      });
+      content.appendChild(pickerA);
+
+      // Week B
+      const labelB = document.createElement('div');
+      labelB.className = 'day-picker-label';
+      labelB.textContent = 'Week B';
+      content.appendChild(labelB);
+      const pickerB = document.createElement('div');
+      pickerB.className = 'day-picker';
+      DAYS.forEach((day, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'day-btn' + (wizState.days_b.includes(day) ? ' active' : '');
+        btn.textContent = DAY_LETTER[i];
+        btn.addEventListener('click', () => {
+          btn.classList.toggle('active');
+          if (wizState.days_b.includes(day)) {
+            wizState.days_b = wizState.days_b.filter(d => d !== day);
+          } else {
+            wizState.days_b.push(day);
+          }
+        });
+        pickerB.appendChild(btn);
+      });
+      content.appendChild(pickerB);
+
+      // Set reference_date if not set (use last Monday)
+      if (!wizState.reference_date) {
+        const today = new Date();
+        const dow = today.getDay();
+        const diff = dow === 0 ? 6 : dow - 1;
+        const monday = new Date(today);
+        monday.setDate(today.getDate() - diff);
+        wizState.reference_date = monday.toISOString().split('T')[0];
+      }
+
+    } else if (rec === 'monthly') {
+      el.wizDaysTitle.textContent = '📋 Select Days of Month';
+      const grid = document.createElement('div');
+      grid.className = 'month-grid';
+      for (let d = 1; d <= 31; d++) {
+        const btn = document.createElement('button');
+        btn.className = 'month-day-btn' + (wizState.month_days.includes(d) ? ' active' : '');
+        btn.textContent = d;
+        btn.addEventListener('click', () => {
+          btn.classList.toggle('active');
+          if (wizState.month_days.includes(d)) {
+            wizState.month_days = wizState.month_days.filter(x => x !== d);
+          } else {
+            wizState.month_days.push(d);
+          }
+        });
+        grid.appendChild(btn);
+      }
+      content.appendChild(grid);
     }
-
-    editor.appendChild(controls);
-    editor.appendChild(actions);
-    return editor;
   }
 
-  function addBtn(container, text, cls, handler) {
-    const btn = document.createElement('button');
-    btn.className = 'editor-btn ' + cls;
-    btn.textContent = text;
-    btn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      handler();
-    });
-    container.appendChild(btn);
+  function saveWizard() {
+    // Convert 12h → 24h
+    let h24 = wizState._h12;
+    if (wizState._isPM && h24 !== 12) h24 += 12;
+    if (!wizState._isPM && h24 === 12) h24 = 0;
+
+    const sched = {
+      id: wizState.id || '',
+      name: wizState.name || autoName(),
+      enabled: wizState.enabled !== false,
+      wake_hour: h24,
+      wake_minute: wizState.wake_minute,
+      off_hour: 23, off_minute: 0,
+      steam: wizState.steam,
+      recurrence: wizState.recurrence,
+      date: wizState.date || '',
+      days: wizState.days || [],
+      days_b: wizState.days_b || [],
+      reference_date: wizState.reference_date || '',
+      month_days: wizState.month_days || []
+    };
+
+    if (editingSchedule) {
+      updateSchedule(editingSchedule, sched);
+    } else {
+      createSchedule(sched);
+    }
+    closeWizard();
   }
+
+  function autoName() {
+    const rec = wizState.recurrence;
+    if (rec === 'once') return 'One-time';
+    if (rec === 'daily') return 'Daily';
+    if (rec === 'weekly') return 'Weekly';
+    if (rec === 'biweekly') return 'Biweekly';
+    if (rec === 'monthly') return 'Monthly';
+    return 'Schedule';
+  }
+
+  // -- Wizard Event Wiring --
+
+  el.addBtn.addEventListener('click', () => openWizard(null));
+  document.getElementById('wiz-cancel').addEventListener('click', closeWizard);
+  document.getElementById('wiz-next-1').addEventListener('click', () => showWizStep(2));
+  document.getElementById('wiz-back-2').addEventListener('click', () => showWizStep(1));
+  document.getElementById('wiz-next-2').addEventListener('click', () => showWizStep(3));
+  document.getElementById('wiz-back-3').addEventListener('click', () => showWizStep(2));
+  document.getElementById('wiz-save').addEventListener('click', saveWizard);
+  el.wizSteam.addEventListener('click', () => {
+    wizState.steam = !wizState.steam;
+    el.wizSteam.className = 'day-toggle' + (wizState.steam ? ' on' : '');
+  });
 
   // -- WebSocket --
 
@@ -405,12 +644,6 @@
       state.lamarzocco.steam_level = level;
       render();
     });
-  });
-
-  // Schedule enable toggle
-  el.scheduleEnable.addEventListener('click', () => {
-    scheduleState.schedule.enabled = !scheduleState.schedule.enabled;
-    saveFullSchedule();
   });
 
   // -- Init --

@@ -75,14 +75,32 @@ WeekdayName = Literal[
 ]
 
 
-class ScheduleEntry(BaseModel):
-    """Configuration for a single ON day."""
+class Schedule(BaseModel):
+    """A single schedule defining when the machine turns on."""
 
+    id: str = ""
+    name: str = ""
+    enabled: bool = True
     wake_hour: int = Field(default=4, ge=0, le=23)
     wake_minute: int = Field(default=50, ge=0, le=59)
     off_hour: int = Field(default=23, ge=0, le=23)
     off_minute: int = Field(default=0, ge=0, le=59)
     steam: bool = True
+
+    recurrence: Literal["once", "daily", "weekly", "biweekly", "monthly"] = "weekly"
+
+    # Once: specific date
+    date: str = ""
+
+    # Weekly / Biweekly Week A
+    days: list[str] = Field(default_factory=list)
+
+    # Biweekly Week B
+    days_b: list[str] = Field(default_factory=list)
+    reference_date: str = ""
+
+    # Monthly
+    month_days: list[int] = Field(default_factory=list)
 
     @property
     def wake_time(self) -> time:
@@ -92,62 +110,62 @@ class ScheduleEntry(BaseModel):
     def off_time(self) -> time:
         return time(self.off_hour, self.off_minute)
 
-
-class RecurringRule(BaseModel):
-    """Generates schedule events on a repeating pattern."""
-
-    id: str = ""
-    name: str = ""
-    type: Literal["weekly", "biweekly"] = "biweekly"
-    reference_date: str = ""  # ISO Monday for biweekly alignment
-    days: list[str] = []  # weekday names (Week A for biweekly)
-    days_b: list[str] = []  # Week B days (biweekly only)
-    entry: ScheduleEntry = Field(default_factory=ScheduleEntry)
-
-    def generates(self, d: date) -> bool:
-        """Does this rule generate an event on date d?"""
-        day_name = WEEKDAYS[d.weekday()]
-        if self.type == "weekly":
-            return day_name in self.days
-        elif self.type == "biweekly":
+    def fires_on(self, d: date) -> bool:
+        """Does this schedule fire on date d?"""
+        if not self.enabled:
+            return False
+        if self.recurrence == "once":
+            return self.date == d.isoformat()
+        elif self.recurrence == "daily":
+            return True
+        elif self.recurrence == "weekly":
+            return WEEKDAYS[d.weekday()] in self.days
+        elif self.recurrence == "biweekly":
             if not self.reference_date:
                 return False
             ref = date.fromisoformat(self.reference_date)
             weeks = (d - ref).days // 7
-            if weeks % 2 == 0:
-                return day_name in self.days
-            else:
-                return day_name in self.days_b
+            day_name = WEEKDAYS[d.weekday()]
+            return day_name in (self.days if weeks % 2 == 0 else self.days_b)
+        elif self.recurrence == "monthly":
+            return d.day in self.month_days
         return False
+
+    def summary(self) -> str:
+        """Human-readable summary."""
+        hr = self.wake_hour % 12 or 12
+        ampm = "AM" if self.wake_hour < 12 else "PM"
+        t = f"{hr}:{self.wake_minute:02d} {ampm}"
+        if self.recurrence == "once":
+            return f"Once · {self.date} · {t}"
+        elif self.recurrence == "daily":
+            return f"Daily · {t}"
+        elif self.recurrence == "weekly":
+            abbrs = [d[:3].title() for d in self.days]
+            return f"Weekly · {', '.join(abbrs)} · {t}"
+        elif self.recurrence == "biweekly":
+            n = len(self.days) + len(self.days_b)
+            return f"Biweekly · {n} days · {t}"
+        elif self.recurrence == "monthly":
+            return f"Monthly · {len(self.month_days)} days · {t}"
+        return t
 
 
 class ScheduleConfig(BaseModel):
-    """Flexible schedule with recurring rules and per-date overrides."""
+    """Collection of schedules."""
 
-    enabled: bool = False
-    rules: list[RecurringRule] = Field(default_factory=list)
-    events: dict[str, ScheduleEntry] = Field(default_factory=dict)  # ISO date → one-time
-    skips: list[str] = Field(default_factory=list)  # ISO dates to skip
+    schedules: list[Schedule] = Field(default_factory=list)
 
-    def resolve(self, d: date) -> tuple[ScheduleEntry | None, str]:
-        """Get effective entry and source for a date.
-        Priority: skips > events > rules > nothing.
-        Returns (entry_or_None, source_string).
-        source: 'skip', 'manual', 'rule:<id>', or '' (nothing).
-        """
-        iso = d.isoformat()
-        if iso in self.skips:
-            return None, "skip"
-        if iso in self.events:
-            return self.events[iso], "manual"
-        for rule in self.rules:
-            if rule.generates(d):
-                return rule.entry, f"rule:{rule.id}"
-        return None, ""
+    def resolve(self, d: date) -> Schedule | None:
+        """Get first enabled schedule that fires on date d."""
+        for sched in self.schedules:
+            if sched.enabled and sched.fires_on(d):
+                return sched
+        return None
 
     def next_event(self, now: datetime | None = None) -> dict | None:
         """Find the next scheduled ON or OFF event within 60 days."""
-        if not self.enabled:
+        if not self.schedules:
             return None
         now = now or datetime.now()
         current_time = now.time()
@@ -155,36 +173,36 @@ class ScheduleConfig(BaseModel):
 
         for i in range(60):
             d = now.date() + timedelta(days=i)
-            entry, source = self.resolve(d)
-            if not entry:
+            sched = self.resolve(d)
+            if not sched:
                 continue
 
             day_name = WEEKDAYS[d.weekday()]
 
-            if i == 0:  # Today
-                if current_time < entry.wake_time:
+            if i == 0:
+                if current_time < sched.wake_time:
                     return {
                         "type": "on",
                         "day": day_name,
                         "date": d.isoformat(),
-                        "hour": entry.wake_hour,
-                        "minute": entry.wake_minute,
+                        "hour": sched.wake_hour,
+                        "minute": sched.wake_minute,
                     }
-                if current_time < entry.off_time:
+                if current_time < sched.off_time:
                     return {
                         "type": "off",
                         "day": day_name,
                         "date": d.isoformat(),
-                        "hour": entry.off_hour,
-                        "minute": entry.off_minute,
+                        "hour": sched.off_hour,
+                        "minute": sched.off_minute,
                     }
             else:
                 return {
                     "type": "on",
                     "day": day_name,
                     "date": d.isoformat(),
-                    "hour": entry.wake_hour,
-                    "minute": entry.wake_minute,
+                    "hour": sched.wake_hour,
+                    "minute": sched.wake_minute,
                 }
 
         return None

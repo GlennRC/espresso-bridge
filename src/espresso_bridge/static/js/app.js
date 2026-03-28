@@ -62,8 +62,13 @@
     const lm = state.lamarzocco;
 
     el.weightValue.textContent = ss.weight_target;
-    el.shotIndicator.textContent = ss.shot_active ? 'BREWING' : 'IDLE';
+    if (ss.shot_active) {
+      el.shotIndicator.textContent = 'BREWING';
+    } else {
+      el.shotIndicator.textContent = ss.enabled ? 'IDLE' : 'OFF';
+    }
     el.shotIndicator.classList.toggle('brewing', ss.shot_active);
+    el.shotIndicator.classList.toggle('disabled', !ss.enabled);
 
     setStatus(el.ssStatus, ss.connected);
     setStatus(el.lmStatus, lm.connected);
@@ -625,6 +630,15 @@
   });
 
   // -- Event handlers --
+
+  // ShotStopper enable/disable toggle
+  el.shotIndicator.addEventListener('click', async () => {
+    const res = await api('POST', '/shotstopper/toggle');
+    if (res && res.ok) {
+      state.shotstopper.enabled = res.enabled;
+      render();
+    }
+  });
 
   // Weight +/- buttons
   el.weightUp.addEventListener('click', () => {

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <title>espresso-bridge</title>
-  <link rel="stylesheet" href="/css/app.css?v=5">
+  <link rel="stylesheet" href="/css/app.css?v=6">
 </head>
 <body>
   <!-- Status Bar -->
@@ -70,25 +70,9 @@
         <button class="toggle-btn banner-toggle" id="schedule-enable">ENABLE</button>
       </div>
 
-      <!-- Calendar Strip (vertical scroll, 28 days) -->
+      <!-- Calendar Strip (vertical scroll, 42 days) -->
       <div class="calendar-strip" id="calendar-strip">
         <!-- Populated by JS -->
-      </div>
-
-      <!-- Settings row (collapsed) -->
-      <div class="card schedule-settings">
-        <div class="control-row">
-          <label>Wake time</label>
-          <input type="time" id="sched-wake-time" class="time-input" value="04:50">
-        </div>
-        <div class="control-row">
-          <label>Steam on wake</label>
-          <button class="day-toggle on" id="sched-steam-toggle"></button>
-        </div>
-        <div class="control-row">
-          <label>Cycle start</label>
-          <input type="date" id="ref-date" class="date-input">
-        </div>
       </div>
     </main>
 
@@ -106,6 +90,6 @@
     </button>
   </nav>
 
-  <script src="/js/app.js?v=3"></script>
+  <script src="/js/app.js?v=4"></script>
 </body>
 </html>

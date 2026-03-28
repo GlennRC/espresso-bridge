@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from espresso_bridge.ble.manager import DeviceManager
 from espresso_bridge.core.config import AppConfig
-from espresso_bridge.core.models import ScheduleConfig
+from espresso_bridge.core.models import ScheduleConfig, ScheduleEntry
 from espresso_bridge.core.state import StateStore
 
 logger = logging.getLogger(__name__)
@@ -142,14 +142,30 @@ def create_app(
 
     @app.get("/api/lm/schedule")
     async def get_schedule():
-        """Get the full schedule config with current week indicator."""
+        """Get the full schedule config with resolved days."""
         sched = config.schedule if config else ScheduleConfig()
-        from datetime import datetime
+        from datetime import datetime, timedelta
 
         now = datetime.now()
+        today = now.date()
+
+        # Resolve next 42 days for the calendar strip
+        resolved = []
+        for i in range(42):
+            d = today + timedelta(days=i)
+            entry, source = sched.resolve(d)
+            day_info = {
+                "date": d.isoformat(),
+                "weekday": d.strftime("%A").lower(),
+                "source": source,
+            }
+            if entry:
+                day_info["entry"] = entry.model_dump()
+            resolved.append(day_info)
+
         return {
             "schedule": sched.model_dump(),
-            "current_week": sched.current_week(now.date()),
+            "resolved": resolved,
             "next_event": sched.next_event(now),
         }
 
@@ -159,11 +175,57 @@ def create_app(
         if config:
             config.save_schedule(new_sched)
             manager.update_schedule(new_sched)
+        from datetime import datetime
+
         return {
             "ok": True,
             "schedule": new_sched.model_dump(),
-            "current_week": new_sched.current_week(),
             "next_event": new_sched.next_event(),
+        }
+
+    @app.post("/api/lm/schedule/day/{iso_date}")
+    async def toggle_schedule_day(iso_date: str, body: dict | None = None):
+        """Toggle a specific day. Body can include {action: 'add'|'skip'|'remove', entry: {...}}."""
+        from datetime import date as date_type, datetime
+
+        sched = config.schedule if config else ScheduleConfig()
+        action = (body or {}).get("action", "toggle")
+        entry_data = (body or {}).get("entry")
+
+        if action == "skip":
+            if iso_date not in sched.skips:
+                sched.skips.append(iso_date)
+            sched.events.pop(iso_date, None)
+        elif action == "remove":
+            sched.skips = [s for s in sched.skips if s != iso_date]
+            sched.events.pop(iso_date, None)
+        elif action == "add":
+            sched.skips = [s for s in sched.skips if s != iso_date]
+            entry = ScheduleEntry(**(entry_data or {}))
+            sched.events[iso_date] = entry
+        else:  # toggle
+            current_entry, source = sched.resolve(date_type.fromisoformat(iso_date))
+            if current_entry:
+                # Currently ON → skip or remove
+                if source == "manual":
+                    sched.events.pop(iso_date, None)
+                else:
+                    if iso_date not in sched.skips:
+                        sched.skips.append(iso_date)
+            else:
+                # Currently OFF → add one-time event
+                sched.skips = [s for s in sched.skips if s != iso_date]
+                entry = ScheduleEntry(**(entry_data or {}))
+                sched.events[iso_date] = entry
+
+        if config:
+            config.save_schedule(sched)
+            manager.update_schedule(sched)
+
+        return {
+            "ok": True,
+            "schedule": sched.model_dump(),
+            "next_event": sched.next_event(),
         }
 
     # -- WebSocket for live state --

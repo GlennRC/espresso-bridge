@@ -14,15 +14,12 @@
   };
 
   let scheduleState = {
-    schedule: {
-      enabled: false,
-      week_a: {},
-      week_b: {},
-      reference_date: ''
-    },
-    current_week: 'a',
+    schedule: { enabled: false, rules: [], events: {}, skips: [] },
+    resolved: [],
     next_event: null
   };
+
+  let expandedDate = null;
 
   // Elements
   const el = {
@@ -39,9 +36,6 @@
     bannerText: document.getElementById('banner-text'),
     scheduleEnable: document.getElementById('schedule-enable'),
     calendarStrip: document.getElementById('calendar-strip'),
-    schedWakeTime: document.getElementById('sched-wake-time'),
-    schedSteamToggle: document.getElementById('sched-steam-toggle'),
-    refDate: document.getElementById('ref-date'),
   };
 
   // -- API helpers --
@@ -90,36 +84,7 @@
     el.classList.add(connected ? 'connected' : 'disconnected');
   }
 
-  // -- Schedule: date helpers --
-
-  function dateKey(d) {
-    // "YYYY-MM-DD"
-    return d.toISOString().slice(0, 10);
-  }
-
-  function isToday(d) {
-    const now = new Date();
-    return d.getFullYear() === now.getFullYear() &&
-           d.getMonth() === now.getMonth() &&
-           d.getDate() === now.getDate();
-  }
-
-  function getWeekLabel(d, refDate) {
-    // Determine week A or B from reference_date
-    if (!refDate) return 'a';
-    const ref = new Date(refDate + 'T00:00:00');
-    const diff = Math.floor((d - ref) / (7 * 86400000));
-    return diff % 2 === 0 ? 'a' : 'b';
-  }
-
-  function getDaySchedule(d, sched) {
-    // Get the DaySchedule for a given Date from the schedule config
-    const weekLabel = getWeekLabel(d, sched.reference_date);
-    const weekKey = weekLabel === 'a' ? 'week_a' : 'week_b';
-    const week = sched[weekKey] || {};
-    const dayName = DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1]; // JS 0=Sun
-    return { daySchedule: week[dayName] || { enabled: false }, weekLabel, dayName };
-  }
+  // -- Schedule helpers --
 
   function formatTime12(h, m) {
     const hr = h % 12 || 12;
@@ -127,175 +92,220 @@
     return `${hr}:${String(m).padStart(2, '0')} ${ampm}`;
   }
 
-  // -- Schedule view render --
-
-  function renderSchedule() {
-    const sched = scheduleState.schedule;
-    const enabled = sched.enabled;
-    const next = scheduleState.next_event;
-
-    // Banner
-    el.scheduleEnable.textContent = enabled ? 'DISABLE' : 'ENABLE';
-    el.scheduleEnable.classList.toggle('on', enabled);
-
-    if (!enabled) {
-      el.bannerText.textContent = 'Schedule not enabled';
-    } else if (next) {
-      const dayLabel = DAY_SHORT[DAYS.indexOf(next.day)] || next.day;
-      const verb = next.type === 'on' ? 'Turns on' : 'Turns off';
-      el.bannerText.textContent = `${verb} ${dayLabel} at ${formatTime12(next.hour, next.minute)}`;
-    } else {
-      el.bannerText.textContent = 'No upcoming events';
-    }
-
-    // Reference date
-    el.refDate.value = sched.reference_date || '';
-
-    // Wake time (use first enabled day we find, or default)
-    let wakeH = 4, wakeM = 50, steamOn = true;
-    for (const wk of [sched.week_a, sched.week_b]) {
-      for (const day of DAYS) {
-        const ds = (wk || {})[day];
-        if (ds && ds.enabled) {
-          wakeH = ds.on_hour;
-          wakeM = ds.on_minute;
-          steamOn = ds.steam !== false;
-          break;
-        }
-      }
-    }
-    el.schedWakeTime.value = String(wakeH).padStart(2, '0') + ':' + String(wakeM).padStart(2, '0');
-    el.schedSteamToggle.classList.toggle('on', steamOn);
-
-    // Calendar strip — show 28 days from today
-    renderCalendarStrip(sched);
-  }
-
-  function renderCalendarStrip(sched) {
-    const strip = el.calendarStrip;
-    strip.innerHTML = '';
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    let lastWeekLabel = null;
-
-    for (let i = 0; i < 28; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
-
-      const { daySchedule: ds, weekLabel } = getDaySchedule(d, sched);
-
-      // Week separator
-      if (weekLabel !== lastWeekLabel) {
-        const sep = document.createElement('div');
-        sep.className = 'cal-week-sep';
-        sep.textContent = 'Week ' + weekLabel.toUpperCase();
-        strip.appendChild(sep);
-        lastWeekLabel = weekLabel;
-      }
-
-      const row = document.createElement('div');
-      row.className = 'cal-day' + (ds.enabled ? ' on' : '') + (isToday(d) ? ' today' : '');
-      row.dataset.date = dateKey(d);
-
-      // Date column
-      const dateCol = document.createElement('div');
-      dateCol.className = 'cal-date';
-      const dateNum = document.createElement('div');
-      dateNum.className = 'cal-date-num';
-      dateNum.textContent = d.getDate();
-      const dateDay = document.createElement('div');
-      dateDay.className = 'cal-date-day';
-      const jsDay = d.getDay() === 0 ? 6 : d.getDay() - 1;
-      dateDay.textContent = isToday(d) ? 'Today' : DAY_SHORT[jsDay];
-      dateCol.appendChild(dateNum);
-      dateCol.appendChild(dateDay);
-
-      // Info column
-      const info = document.createElement('div');
-      info.className = 'cal-info';
-
-      const statusEl = document.createElement('span');
-      statusEl.className = 'cal-status';
-      statusEl.textContent = ds.enabled ? '● ON' : 'OFF';
-
-      info.appendChild(statusEl);
-
-      if (ds.enabled) {
-        const timeEl = document.createElement('span');
-        timeEl.className = 'cal-time';
-        timeEl.textContent = formatTime12(ds.on_hour || 0, ds.on_minute || 0);
-        info.appendChild(timeEl);
-
-        if (ds.steam !== false) {
-          const steamEl = document.createElement('span');
-          steamEl.className = 'cal-steam';
-          steamEl.textContent = '♨';
-          info.appendChild(steamEl);
-        }
-      }
-
-      row.appendChild(dateCol);
-      row.appendChild(info);
-
-      // Tap to toggle
-      row.addEventListener('click', () => toggleDay(d, sched));
-
-      strip.appendChild(row);
-    }
-
-    // Scroll to today (first item, so already at top)
-  }
-
-  function toggleDay(date, sched) {
-    const { daySchedule: ds, weekLabel, dayName } = getDaySchedule(date, sched);
-    const weekKey = weekLabel === 'a' ? 'week_a' : 'week_b';
-
-    if (!sched[weekKey]) sched[weekKey] = {};
-    if (!sched[weekKey][dayName]) {
-      sched[weekKey][dayName] = { enabled: false, on_hour: 4, on_minute: 50, off_hour: 23, off_minute: 0, steam: true };
-    }
-
-    // Read current wake time from settings
-    const [wH, wM] = el.schedWakeTime.value.split(':').map(Number);
-    const steamOn = el.schedSteamToggle.classList.contains('on');
-
-    const day = sched[weekKey][dayName];
-    day.enabled = !day.enabled;
-    day.on_hour = wH || 4;
-    day.on_minute = wM || 50;
-    day.steam = steamOn;
-
-    saveSchedule();
+  function formatDateShort(iso) {
+    const d = new Date(iso + 'T00:00:00');
+    return `${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
   }
 
   // -- Schedule API --
-
-  let saveTimeout = null;
-
-  function saveSchedule() {
-    if (saveTimeout) clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(async () => {
-      const sched = scheduleState.schedule;
-      sched.reference_date = el.refDate.value || '';
-      const res = await api('POST', '/lm/schedule', sched);
-      if (res.schedule) {
-        scheduleState.schedule = res.schedule;
-        scheduleState.current_week = res.current_week;
-        scheduleState.next_event = res.next_event;
-        renderSchedule();
-      }
-    }, 300);
-  }
 
   async function loadSchedule() {
     const res = await api('GET', '/lm/schedule');
     if (res.schedule) {
       scheduleState.schedule = res.schedule;
-      scheduleState.current_week = res.current_week || 'a';
+      scheduleState.resolved = res.resolved || [];
       scheduleState.next_event = res.next_event;
       renderSchedule();
     }
+  }
+
+  async function saveFullSchedule() {
+    await api('POST', '/lm/schedule', scheduleState.schedule);
+    await loadSchedule();
+  }
+
+  async function dayAction(isoDate, action, entryData) {
+    const body = { action };
+    if (entryData) body.entry = entryData;
+    await api('POST', `/lm/schedule/day/${isoDate}`, body);
+    expandedDate = null;
+    await loadSchedule();
+  }
+
+  // -- Schedule render --
+
+  function renderSchedule() {
+    const { schedule, next_event } = scheduleState;
+
+    // Banner
+    el.scheduleEnable.textContent = schedule.enabled ? 'DISABLE' : 'ENABLE';
+    el.scheduleEnable.classList.toggle('on', schedule.enabled);
+
+    if (!schedule.enabled) {
+      el.bannerText.textContent = 'Schedule not enabled';
+    } else if (next_event) {
+      const dayLabel = DAY_SHORT[DAYS.indexOf(next_event.day)] || next_event.day;
+      const verb = next_event.type === 'on' ? 'Turns on' : 'Turns off';
+      const dateStr = next_event.date ? formatDateShort(next_event.date) : '';
+      el.bannerText.textContent = `${verb} ${dayLabel} ${dateStr} at ${formatTime12(next_event.hour, next_event.minute)}`;
+    } else {
+      el.bannerText.textContent = 'No upcoming events';
+    }
+
+    renderCalendarStrip();
+  }
+
+  function renderCalendarStrip() {
+    const strip = el.calendarStrip;
+    const scrollPos = strip.scrollTop;
+    strip.innerHTML = '';
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let lastMonth = null;
+
+    for (const day of scheduleState.resolved) {
+      const d = new Date(day.date + 'T00:00:00');
+      const isTodayDate = d.getTime() === today.getTime();
+      const hasEntry = !!day.entry;
+      const isSkip = day.source === 'skip';
+      const isRecurring = day.source.startsWith('rule:');
+      const isManual = day.source === 'manual';
+      const isExpanded = expandedDate === day.date;
+
+      // Month separator
+      const month = d.getMonth();
+      if (month !== lastMonth) {
+        const sep = document.createElement('div');
+        sep.className = 'cal-month-sep';
+        sep.textContent = MONTH_SHORT[month] + ' ' + d.getFullYear();
+        strip.appendChild(sep);
+        lastMonth = month;
+      }
+
+      // Day row
+      const row = document.createElement('div');
+      row.className = 'cal-day';
+      if (hasEntry) row.classList.add('on');
+      if (isSkip) row.classList.add('skip');
+      if (isTodayDate) row.classList.add('today');
+      if (isExpanded) row.classList.add('expanded');
+
+      // Date column
+      const dateCol = document.createElement('div');
+      dateCol.className = 'cal-date';
+      const jsDay = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      dateCol.innerHTML =
+        '<div class="cal-date-num">' + d.getDate() + '</div>' +
+        '<div class="cal-date-day">' + (isTodayDate ? 'Today' : DAY_SHORT[jsDay]) + '</div>';
+
+      // Info column
+      const info = document.createElement('div');
+      info.className = 'cal-info';
+
+      if (isSkip) {
+        info.innerHTML = '<span class="cal-status">SKIP</span>';
+      } else if (hasEntry) {
+        const e = day.entry;
+        const srcIcon = isRecurring ? '🔄' : '📌';
+        info.innerHTML =
+          '<span class="cal-status">● ON</span>' +
+          '<span class="cal-time">' + formatTime12(e.wake_hour, e.wake_minute) + '</span>' +
+          (e.steam ? '<span class="cal-steam">♨</span>' : '') +
+          '<span class="cal-source">' + srcIcon + '</span>';
+      } else {
+        info.innerHTML = '<span class="cal-status">OFF</span>';
+      }
+
+      row.appendChild(dateCol);
+      row.appendChild(info);
+
+      // Tap to expand/collapse
+      row.addEventListener('click', () => {
+        expandedDate = expandedDate === day.date ? null : day.date;
+        renderCalendarStrip();
+      });
+
+      strip.appendChild(row);
+
+      // Editor accordion
+      if (isExpanded) {
+        strip.appendChild(createEditor(day));
+      }
+    }
+
+    strip.scrollTop = scrollPos;
+  }
+
+  function createEditor(day) {
+    const editor = document.createElement('div');
+    editor.className = 'cal-editor';
+
+    const hasEntry = !!day.entry;
+    const isSkip = day.source === 'skip';
+    const isRecurring = day.source.startsWith('rule:');
+    const isManual = day.source === 'manual';
+
+    const wakeH = hasEntry ? day.entry.wake_hour : 4;
+    const wakeM = hasEntry ? day.entry.wake_minute : 50;
+    const steam = hasEntry ? day.entry.steam : true;
+    const timeVal = String(wakeH).padStart(2, '0') + ':' + String(wakeM).padStart(2, '0');
+
+    // Controls row
+    const controls = document.createElement('div');
+    controls.className = 'editor-controls';
+    controls.innerHTML =
+      '<div class="editor-field">' +
+        '<label>Wake</label>' +
+        '<input type="time" class="time-input editor-time" value="' + timeVal + '">' +
+      '</div>' +
+      '<div class="editor-field">' +
+        '<label>Steam</label>' +
+        '<button class="day-toggle editor-steam ' + (steam ? 'on' : '') + '"></button>' +
+      '</div>';
+
+    // Prevent clicks in editor from collapsing
+    controls.addEventListener('click', function(e) { e.stopPropagation(); });
+
+    // Steam toggle
+    const steamBtn = controls.querySelector('.editor-steam');
+    steamBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      steamBtn.classList.toggle('on');
+    });
+
+    // Actions row
+    const actions = document.createElement('div');
+    actions.className = 'editor-actions';
+
+    const timeInput = controls.querySelector('.editor-time');
+
+    function getEntryData() {
+      const parts = timeInput.value.split(':');
+      return {
+        wake_hour: parseInt(parts[0]) || 4,
+        wake_minute: parseInt(parts[1]) || 50,
+        off_hour: 23, off_minute: 0,
+        steam: steamBtn.classList.contains('on')
+      };
+    }
+
+    if (isSkip) {
+      addBtn(actions, 'Un-skip', 'unskip', function() { dayAction(day.date, 'remove'); });
+    } else if (!hasEntry) {
+      addBtn(actions, '+ Add', 'add', function() { dayAction(day.date, 'add', getEntryData()); });
+    } else if (isManual) {
+      addBtn(actions, 'Remove', 'remove', function() { dayAction(day.date, 'remove'); });
+      addBtn(actions, 'Save', 'save', function() { dayAction(day.date, 'add', getEntryData()); });
+    } else if (isRecurring) {
+      addBtn(actions, 'Skip', 'skip', function() { dayAction(day.date, 'skip'); });
+      addBtn(actions, 'Customize', 'save', function() { dayAction(day.date, 'add', getEntryData()); });
+    }
+
+    editor.appendChild(controls);
+    editor.appendChild(actions);
+    return editor;
+  }
+
+  function addBtn(container, text, cls, handler) {
+    const btn = document.createElement('button');
+    btn.className = 'editor-btn ' + cls;
+    btn.textContent = text;
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      handler();
+    });
+    container.appendChild(btn);
   }
 
   // -- WebSocket --
@@ -400,45 +410,7 @@
   // Schedule enable toggle
   el.scheduleEnable.addEventListener('click', () => {
     scheduleState.schedule.enabled = !scheduleState.schedule.enabled;
-    saveSchedule();
-  });
-
-  // Wake time change — update all enabled days
-  el.schedWakeTime.addEventListener('change', () => {
-    const [h, m] = el.schedWakeTime.value.split(':').map(Number);
-    if (isNaN(h) || isNaN(m)) return;
-    const sched = scheduleState.schedule;
-    for (const weekKey of ['week_a', 'week_b']) {
-      const week = sched[weekKey] || {};
-      for (const day of DAYS) {
-        if (week[day] && week[day].enabled) {
-          week[day].on_hour = h;
-          week[day].on_minute = m;
-        }
-      }
-    }
-    saveSchedule();
-  });
-
-  // Steam toggle
-  el.schedSteamToggle.addEventListener('click', () => {
-    const on = !el.schedSteamToggle.classList.contains('on');
-    el.schedSteamToggle.classList.toggle('on', on);
-    const sched = scheduleState.schedule;
-    for (const weekKey of ['week_a', 'week_b']) {
-      const week = sched[weekKey] || {};
-      for (const day of DAYS) {
-        if (week[day] && week[day].enabled) {
-          week[day].steam = on;
-        }
-      }
-    }
-    saveSchedule();
-  });
-
-  // Reference date
-  el.refDate.addEventListener('change', () => {
-    saveSchedule();
+    saveFullSchedule();
   });
 
   // -- Init --

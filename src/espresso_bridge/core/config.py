@@ -12,9 +12,9 @@ from pathlib import Path
 import yaml
 
 from espresso_bridge.core.models import (
-    DaySchedule,
+    RecurringRule,
     ScheduleConfig,
-    WeekSchedule,
+    ScheduleEntry,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,11 +115,49 @@ class AppConfig:
 
 
 def _parse_schedule(raw: dict) -> ScheduleConfig:
-    """Parse schedule section from YAML dict."""
+    """Parse schedule section from YAML dict. Auto-migrates old week_a/week_b format."""
     if not raw:
         return ScheduleConfig()
     try:
+        # Detect old format by presence of week_a/week_b keys
+        if "week_a" in raw or "week_b" in raw:
+            return _migrate_old_schedule(raw)
         return ScheduleConfig(**raw)
     except Exception:
         logger.warning("Invalid schedule config, using defaults")
         return ScheduleConfig()
+
+
+def _migrate_old_schedule(raw: dict) -> ScheduleConfig:
+    """Convert old week_a/week_b format to new rules+events format."""
+    days_a: list[str] = []
+    days_b: list[str] = []
+    entry = ScheduleEntry()
+
+    for week_key, day_list in [("week_a", days_a), ("week_b", days_b)]:
+        week = raw.get(week_key, {})
+        for day_name, day_cfg in week.items():
+            if isinstance(day_cfg, dict) and day_cfg.get("enabled"):
+                day_list.append(day_name)
+                # Use first enabled day's time as the rule entry
+                if not days_a or (week_key == "week_a" and len(days_a) == 1):
+                    entry = ScheduleEntry(
+                        wake_hour=day_cfg.get("on_hour", 4),
+                        wake_minute=day_cfg.get("on_minute", 50),
+                        off_hour=day_cfg.get("off_hour", 23),
+                        off_minute=day_cfg.get("off_minute", 0),
+                        steam=day_cfg.get("steam", True),
+                    )
+
+    rule = RecurringRule(
+        id="migrated",
+        name="Migrated Schedule",
+        type="biweekly",
+        reference_date=raw.get("reference_date", ""),
+        days=days_a,
+        days_b=days_b,
+        entry=entry,
+    )
+
+    rules = [rule] if days_a or days_b else []
+    return ScheduleConfig(enabled=raw.get("enabled", False), rules=rules)

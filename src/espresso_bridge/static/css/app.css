@@ -337,6 +337,14 @@ html, body {
 .cal-day.on.today {
   border-color: var(--green);
 }
+.cal-day.skip {
+  background: #2a2020;
+  opacity: 0.6;
+}
+.cal-day.expanded {
+  border-radius: 10px 10px 0 0;
+  margin-bottom: 0;
+}
 .cal-date {
   width: 44px;
   text-align: center;
@@ -370,6 +378,11 @@ html, body {
   color: var(--green);
   font-weight: 600;
 }
+.cal-day.skip .cal-status {
+  color: var(--red);
+  text-decoration: line-through;
+  opacity: 0.8;
+}
 .cal-time {
   font-size: 13px;
   color: var(--text-dim);
@@ -385,27 +398,77 @@ html, body {
   opacity: 1;
   color: var(--orange);
 }
-.cal-week-sep {
-  padding: 6px 12px;
-  font-size: 11px;
+.cal-source {
+  font-size: 12px;
+  opacity: 0.6;
+}
+.cal-month-sep {
+  padding: 10px 12px 4px;
+  font-size: 12px;
   font-weight: 700;
-  color: var(--text-dim);
+  color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 1px;
 }
 
-/* Schedule Settings */
-.schedule-settings {
-  flex-shrink: 0;
-  gap: 8px;
+/* Accordion Editor */
+.cal-editor {
+  background: #2a2a2a;
+  border-radius: 0 0 10px 10px;
   padding: 12px 16px;
+  margin-bottom: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.schedule-settings .control-row {
-  padding: 6px 0;
+.editor-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
-.schedule-settings label {
-  font-size: 14px;
+.editor-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.editor-field label {
+  font-size: 13px;
   color: var(--text-dim);
+}
+.editor-actions {
+  display: flex;
+  gap: 8px;
+}
+.editor-btn {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #444;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.editor-btn:active {
+  opacity: 0.7;
+}
+.editor-btn.add {
+  border-color: var(--green);
+  color: var(--green);
+}
+.editor-btn.save {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.editor-btn.skip, .editor-btn.remove {
+  border-color: var(--red);
+  color: var(--red);
+}
+.editor-btn.unskip {
+  border-color: var(--green);
+  color: var(--green);
 }
 
 /* Shared controls */

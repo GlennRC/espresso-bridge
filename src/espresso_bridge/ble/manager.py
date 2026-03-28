@@ -270,42 +270,37 @@ class DeviceManager:
             return
 
         now = datetime.now()
-        today = sched.today_schedule(now)
+        today = now.date()
+        entry, source = sched.resolve(today)
 
-        if not today.enabled:
+        if not entry:
             return
 
         current_minutes = now.hour * 60 + now.minute
-        on_minutes = today.on_hour * 60 + today.on_minute
-        off_minutes = today.off_hour * 60 + today.off_minute
+        on_minutes = entry.wake_hour * 60 + entry.wake_minute
+        off_minutes = entry.off_hour * 60 + entry.off_minute
 
         # Determine desired state
-        # Handle normal case (on_time < off_time)
         if on_minutes < off_minutes:
             should_be_on = on_minutes <= current_minutes < off_minutes
         else:
-            # Wraps midnight (e.g., on=22:00, off=06:00)
             should_be_on = current_minutes >= on_minutes or current_minutes < off_minutes
 
-        # Build a fire key to avoid re-triggering same event within the same minute
-        fire_key = f"{now.date().isoformat()}:{current_minutes}:{'on' if should_be_on else 'off'}"
+        fire_key = f"{today.isoformat()}:{current_minutes}:{'on' if should_be_on else 'off'}"
 
         if fire_key == self._last_fired:
             return
 
-        # Only fire at transition boundaries (within 1 minute of on/off time)
         at_on = abs(current_minutes - on_minutes) <= 1
         at_off = abs(current_minutes - off_minutes) <= 1
 
         if at_on and should_be_on:
-            logger.info(f"Schedule: turning machine ON ({today.on_hour:02d}:{today.on_minute:02d})")
+            logger.info(f"Schedule: turning machine ON ({entry.wake_hour:02d}:{entry.wake_minute:02d})")
             ok = await self._lamarzocco.set_power(True)
-            if ok and today.steam:
+            if ok and entry.steam:
                 await self._lamarzocco.set_steam_enabled(True)
             self._last_fired = fire_key
         elif at_off and not should_be_on:
-            logger.info(
-                f"Schedule: turning machine OFF ({today.off_hour:02d}:{today.off_minute:02d})"
-            )
+            logger.info(f"Schedule: turning machine OFF ({entry.off_hour:02d}:{entry.off_minute:02d})")
             await self._lamarzocco.set_power(False)
             self._last_fired = fire_key

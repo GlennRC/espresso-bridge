@@ -204,8 +204,10 @@
     const scroller = container.querySelector('.wheel-scroller');
     scroller.innerHTML = '';
     const itemHeight = 44;
-    const containerHeight = container.offsetHeight || 180;
-    // CSS padding centers the first/last item in the highlight zone
+    // Use CSS-defined heights (offsetHeight may be 0 if not yet laid out)
+    const isLg = container.classList.contains('wheel-picker-lg');
+    const containerHeight = isLg ? 200 : 180;
+    // CSS padding centers the selected item in the highlight zone
     const padPx = (containerHeight - itemHeight) / 2;
     scroller.style.paddingTop = padPx + 'px';
     scroller.style.paddingBottom = padPx + 'px';

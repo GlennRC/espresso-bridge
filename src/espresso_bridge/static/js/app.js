@@ -147,9 +147,8 @@
     // Banner
     if (next_event) {
       const dayLabel = DAY_SHORT[DAYS.indexOf(next_event.day)] || next_event.day;
-      const verb = next_event.type === 'on' ? 'Turns on' : 'Turns off';
       const dateStr = next_event.date ? formatDateShort(next_event.date) : '';
-      el.bannerText.textContent = `${verb} ${dayLabel} ${dateStr} at ${formatTime12(next_event.hour, next_event.minute)}`;
+      el.bannerText.textContent = `Turns on ${dayLabel} ${dateStr} at ${formatTime12(next_event.hour, next_event.minute)}`;
     } else {
       el.bannerText.textContent = schedules.length ? 'No upcoming events' : 'No schedules yet';
     }
@@ -551,9 +550,10 @@
       month_days: wizState.month_days || []
     };
 
+    const isEditing = editingSchedule;
     closeWizard();
-    if (editingSchedule) {
-      await updateSchedule(editingSchedule, sched);
+    if (isEditing) {
+      await updateSchedule(isEditing, sched);
     } else {
       await createSchedule(sched);
     }

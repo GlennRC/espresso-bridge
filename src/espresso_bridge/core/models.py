@@ -164,7 +164,7 @@ class ScheduleConfig(BaseModel):
         return None
 
     def next_event(self, now: datetime | None = None) -> dict | None:
-        """Find the next scheduled ON or OFF event within 60 days."""
+        """Find the next scheduled wake event within 60 days."""
         if not self.schedules:
             return None
         now = now or datetime.now()
@@ -179,30 +179,16 @@ class ScheduleConfig(BaseModel):
 
             day_name = WEEKDAYS[d.weekday()]
 
-            if i == 0:
-                if current_time < sched.wake_time:
-                    return {
-                        "type": "on",
-                        "day": day_name,
-                        "date": d.isoformat(),
-                        "hour": sched.wake_hour,
-                        "minute": sched.wake_minute,
-                    }
-                if current_time < sched.off_time:
-                    return {
-                        "type": "off",
-                        "day": day_name,
-                        "date": d.isoformat(),
-                        "hour": sched.off_hour,
-                        "minute": sched.off_minute,
-                    }
-            else:
-                return {
-                    "type": "on",
-                    "day": day_name,
-                    "date": d.isoformat(),
-                    "hour": sched.wake_hour,
-                    "minute": sched.wake_minute,
-                }
+            # Today: only if wake time hasn't passed yet
+            if i == 0 and current_time >= sched.wake_time:
+                continue
+
+            return {
+                "type": "on",
+                "day": day_name,
+                "date": d.isoformat(),
+                "hour": sched.wake_hour,
+                "minute": sched.wake_minute,
+            }
 
         return None

@@ -133,13 +133,14 @@ class TestScheduleConfig:
         assert ev["minute"] == 50
 
     def test_next_event_between(self):
-        s = Schedule(recurrence="weekly", days=["monday"])
+        """Between wake and off on a scheduled day, next event is next wake."""
+        s = Schedule(recurrence="weekly", days=["monday", "tuesday"])
         sc = ScheduleConfig(schedules=[s])
+        # 12:00 on Monday (after 4:50 wake) → next wake is Tuesday
         ev = sc.next_event(datetime(2026, 3, 30, 12, 0))
         assert ev is not None
-        assert ev["type"] == "off"
-        assert ev["hour"] == 23
-        assert ev["minute"] == 0
+        assert ev["type"] == "on"
+        assert ev["day"] == "tuesday"
 
     def test_next_event_future(self):
         s = Schedule(recurrence="weekly", days=["monday", "tuesday"])

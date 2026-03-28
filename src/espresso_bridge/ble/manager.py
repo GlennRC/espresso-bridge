@@ -121,6 +121,10 @@ class DeviceManager:
 
             self._ss_phase = ConnectionPhase.SCANNING
 
+            # After 5 consecutive failures, reset bluetooth adapter
+            if failures > 0 and failures % 5 == 0:
+                await self._reset_bluetooth_adapter()
+
             self._ss_phase = ConnectionPhase.CONNECTING
             async with self._scan_lock:
                 success = await self._shotstopper.connect(address=addr)
@@ -147,6 +151,8 @@ class DeviceManager:
 
         Once connected, periodically refreshes state from the machine.
         Detects BLE disconnects and reconnects automatically.
+        After repeated failures, resets the bluetooth adapter to recover
+        from stale bluez state.
         """
         if not self._lamarzocco:
             return
@@ -172,6 +178,10 @@ class DeviceManager:
 
             self._lm_phase = ConnectionPhase.SCANNING
 
+            # After 5 consecutive failures, reset bluetooth adapter
+            if failures > 0 and failures % 5 == 0:
+                await self._reset_bluetooth_adapter()
+
             self._lm_phase = ConnectionPhase.CONNECTING
             async with self._scan_lock:
                 success = await self._lamarzocco.connect_silent(address=addr)
@@ -184,11 +194,52 @@ class DeviceManager:
                 failures += 1
                 self._lm_phase = ConnectionPhase.DISCONNECTED
                 delay = min(interval * (2 ** (failures - 1)), 30.0)
-                if failures <= 3 or failures % 10 == 0:
+                if failures <= 3 or failures % 5 == 0:
                     logger.warning(
                         f"La Marzocco: connect failed #{failures}, retry in {delay:.0f}s"
                     )
                 await asyncio.sleep(delay)
+
+    # -- Bluetooth adapter reset --
+
+    async def _reset_bluetooth_adapter(self) -> None:
+        """Reset the bluetooth adapter to recover from stale bluez state.
+
+        When bluez holds a stale connection, new connect attempts get
+        BleakDeviceNotFoundError indefinitely. Power-cycling the adapter
+        clears this. Falls back to restarting the bluetooth service.
+        """
+        logger.warning("Resetting bluetooth adapter to recover from stale state")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "bluetoothctl", "power", "off",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+            await asyncio.sleep(2)
+
+            proc = await asyncio.create_subprocess_exec(
+                "bluetoothctl", "power", "on",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+            await asyncio.sleep(3)
+            logger.info("Bluetooth adapter reset complete")
+        except Exception:
+            logger.warning("bluetoothctl reset failed, trying systemctl restart")
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "sudo", "systemctl", "restart", "bluetooth",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.wait()
+                await asyncio.sleep(3)
+                logger.info("Bluetooth service restarted")
+            except Exception:
+                logger.exception("Failed to reset bluetooth")
 
     # -- Schedule engine --
 

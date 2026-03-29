@@ -107,16 +107,6 @@ def create_app(
         ok = await manager.shotstopper.apply_config(config)
         return {"ok": ok}
 
-    @app.post("/api/shotstopper/toggle")
-    async def toggle_shotstopper():
-        """Toggle brew-by-weight on the ShotStopper device via BLE."""
-        ss = manager.shotstopper
-        if not ss.connected:
-            return {"ok": False, "error": "ShotStopper not connected"}
-        new_val = not ss.state.enabled
-        ok = await ss.set_enabled(new_val)
-        return {"ok": ok, "enabled": ss.state.enabled}
-
     # -- La Marzocco endpoints --
 
     @app.post("/api/lm/power")

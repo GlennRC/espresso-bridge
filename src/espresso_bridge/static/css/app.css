@@ -12,7 +12,8 @@
   --orange: #ff9800;
   --blue: #2196f3;
   --radius: 12px;
-  --tab-height: 60px;
+  --tab-height: 48px;
+  --status-height: 28px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; cursor: none !important; }
@@ -33,9 +34,11 @@ html, body {
 #status-bar {
   display: flex;
   gap: 16px;
-  padding: 8px 16px;
+  padding: 4px 16px;
   background: #111;
-  font-size: 14px;
+  font-size: 13px;
+  height: var(--status-height);
+  align-items: center;
 }
 .status-item {
   color: var(--text-dim);
@@ -51,7 +54,7 @@ html, body {
 
 /* Views Container */
 #views {
-  height: calc(100vh - 36px - var(--tab-height));
+  height: calc(100vh - var(--status-height) - var(--tab-height));
   overflow: hidden;
 }
 
@@ -71,10 +74,10 @@ html, body {
 .card {
   background: var(--card-bg);
   border-radius: var(--radius);
-  padding: 20px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 .card h2 {
   font-size: 16px;
@@ -86,7 +89,7 @@ html, body {
 
 /* Weight Card */
 .weight-card {
-  flex: 1.2;
+  flex: 1;
   align-items: center;
   justify-content: center;
 }
@@ -96,25 +99,25 @@ html, body {
   gap: 12px;
 }
 .weight-value {
-  font-size: 72px;
+  font-size: 56px;
   font-weight: 300;
   line-height: 1;
-  min-width: 100px;
+  min-width: 80px;
   text-align: center;
 }
 .weight-unit {
-  font-size: 32px;
+  font-size: 28px;
   color: var(--text-dim);
   margin-left: -8px;
 }
 .weight-btn {
-  width: 64px;
-  height: 64px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   border: 2px solid var(--accent);
   background: transparent;
   color: var(--accent);
-  font-size: 32px;
+  font-size: 28px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -164,6 +167,7 @@ html, body {
 /* Machine Card */
 .machine-card {
   flex: 1;
+  justify-content: center;
 }
 .control-row {
   display: flex;
@@ -264,10 +268,10 @@ html, body {
 .tab {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 6px;
   border: none;
   background: transparent;
   color: var(--text-dim);
@@ -279,10 +283,10 @@ html, body {
   color: var(--accent);
 }
 .tab-icon {
-  font-size: 24px;
+  font-size: 20px;
 }
 .tab-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -293,7 +297,7 @@ html, body {
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  padding: 16px 20px;
+  padding: 12px 20px;
   gap: 12px;
   flex-shrink: 0;
 }
@@ -394,20 +398,20 @@ html, body {
   z-index: 100;
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  padding: 12px;
 }
 .wizard-step {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 20px;
+  gap: 14px;
   flex: 1;
 }
 .wiz-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
-  padding-top: 12px;
+  padding-top: 4px;
 }
 .wiz-row {
   display: flex;
@@ -464,7 +468,7 @@ html, body {
 .wheel-picker {
   position: relative;
   width: 80px;
-  height: 180px;
+  height: 140px;
   overflow: hidden;
   border-radius: 12px;
   background: var(--card-bg);
@@ -477,7 +481,7 @@ html, body {
 }
 .wheel-picker-lg {
   width: 220px;
-  height: 200px;
+  height: 160px;
 }
 .wheel-highlight {
   position: absolute;

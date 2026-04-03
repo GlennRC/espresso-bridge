@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <title>espresso-bridge</title>
-  <link rel="stylesheet" href="/css/app.css?v=14">
+  <link rel="stylesheet" href="/css/app.css?v=15">
 </head>
 <body>
   <!-- Status Bar -->
@@ -18,7 +18,6 @@
 
     <!-- Brew View (default) -->
     <main id="brew-view" class="view active">
-      <!-- Weight Control -->
       <section class="card weight-card">
         <h2>Target Weight</h2>
         <div class="weight-display">
@@ -35,8 +34,10 @@
         </div>
         <div class="shot-indicator" id="shot-indicator">IDLE</div>
       </section>
+    </main>
 
-      <!-- Machine Controls -->
+    <!-- Machine View -->
+    <main id="machine-view" class="view">
       <section class="card machine-card">
         <h2>Linea Micra</h2>
         <div class="control-row">
@@ -140,12 +141,16 @@
       <span class="tab-icon">☕</span>
       <span class="tab-label">Brew</span>
     </button>
+    <button class="tab" data-view="machine-view">
+      <span class="tab-icon">⚙️</span>
+      <span class="tab-label">Machine</span>
+    </button>
     <button class="tab" data-view="schedule-view">
       <span class="tab-icon">⏰</span>
       <span class="tab-label">Schedule</span>
     </button>
   </nav>
 
-  <script src="/js/app.js?v=10"></script>
+  <script src="/js/app.js?v=11"></script>
 </body>
 </html>
